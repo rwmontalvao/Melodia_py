@@ -12,7 +12,7 @@ conda create --name melodia python=3.8
 conda activate melodia
 ```
 
-Melodia requires Jupyterlab and NGL Viewer.
+Melodia requires [Jupyterlab](https://jupyter.org/) and [NGL Viewer](https://github.com/nglviewer/nglview).
 
 ```shell
 conda install jupyterlab
@@ -20,7 +20,7 @@ conda install nglview -c conda-forge
 jupyter-nbextension enable nglview --py --sys-prefix
 ```
 
-The examples need seaborn and scikit-learn.
+The examples need [seaborn](https://seaborn.pydata.org/) and [scikit-learn](https://scikit-learn.org/stable).
 
 ```shell
 conda install -c conda-forge seaborn
