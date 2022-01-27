@@ -17,14 +17,28 @@ conda activate melodia
 ```shell
 conda install jupyterlab
 conda install nglview -c conda-forge
-jupyter-nbextension enable nglview --py --sys-prefix
 ```
+
+or using [Mamba](https://github.com/mamba-org/mamba)
+
+```shell
+mamba install jupyterlab
+mamba install nglview -c conda-forge
+```
+
 
 The examples need [seaborn](https://seaborn.pydata.org/) and [scikit-learn](https://scikit-learn.org/stable).
 
 ```shell
 conda install -c conda-forge seaborn
 conda install -c conda-forge scikit-learn
+```
+
+or
+
+```shell
+mamba install -c conda-forge seaborn
+mamba install -c conda-forge scikit-learn
 ```
 
 To build and install **Melodia**:
