@@ -1,18 +1,18 @@
 # Melodia
 ## Differential Geometry of Protein Backbones
 
-Melodia is a python based library for computing Differential Geometry
+**Melodia** is a python based library for computing Differential Geometry
 of protein structures (backbones). 
 
 ## Installation
-It is recommended the creation of a new environment for Melodia.
+It is recommended the creation of a new environment for **Melodia**.
 
 ```shell
 conda create --name melodia python=3.8
 conda activate melodia
 ```
 
-Melodia requires [Jupyterlab](https://jupyter.org/) and [NGL Viewer](https://github.com/nglviewer/nglview).
+**Melodia** requires [Jupyterlab](https://jupyter.org/) and [NGL Viewer](https://github.com/nglviewer/nglview).
 
 ```shell
 conda install jupyterlab
@@ -27,7 +27,7 @@ conda install -c conda-forge seaborn
 conda install -c conda-forge scikit-learn
 ```
 
-To build and install Melodia:
+To build and install **Melodia**:
 
 ```shell
 python setup.py install
