@@ -84,6 +84,7 @@ def proc_chains(structure: Structure) -> pd.DataFrame:
 
     # Generate a Pandas Dataframe
     identity = []
+    model = []
     chain = []
     order = []
     name = []
@@ -98,6 +99,7 @@ def proc_chains(structure: Structure) -> pd.DataFrame:
         tokens = key.split(':')
 
         for res_id in value.residues:
+            model.append(tokens[1])
             chain.append(tokens[2])
 
             identity.append(value.residues[res_id].res_num)
@@ -111,6 +113,7 @@ def proc_chains(structure: Structure) -> pd.DataFrame:
             angle_psi.append(value.residues[res_id].psi)
 
     base = {'id': identity,
+            'model': model,
             'code': pdb_code,
             'chain': chain,
             'order': order,
