@@ -99,7 +99,7 @@ def proc_chains(structure: Structure) -> pd.DataFrame:
         tokens = key.split(':')
 
         for res_id in value.residues:
-            model.append(tokens[1])
+            model.append(int(tokens[1]))
             chain.append(tokens[2])
 
             identity.append(value.residues[res_id].res_num)
@@ -148,15 +148,19 @@ def geometry_dict_from_structure(structure: Structure) -> Dict[str, GeometryPars
     return chains
 
 
-def bfactor_from_geo(structure: Structure, attribute: str) -> None:
+def bfactor_from_geo(structure: Structure, attribute: str, geo: Dict[str, GeometryParser] = None) -> None:
     """
-        Set the PDB bfactor to torsion values
+        Set the PDB bfactor to geometric values
          :param structure: BioPython PDB Structure class
          :type structure: Structure
          :param attribute: geometric attribute
          :type attribute: str
+        :param geo: Geometry Dictionary
+        :type: Dict[str, GeometryParser]
+
     """
-    geo = geometry_dict_from_structure(structure)
+    if geo is None:
+        geo = geometry_dict_from_structure(structure)
 
     for model in structure.get_list():
         for chain in model.get_list():
@@ -178,7 +182,7 @@ def bfactor_from_geo(structure: Structure, attribute: str) -> None:
 
 def view_putty(structure: Structure, radius_scale=1.0, width=1200, height=600) -> Box:
     """
-        Set the PDB bfactor to torsion values
+        Display PDB structure as a putty model
         :param structure: BioPython PDB Structure class
         :type structure: Structure
         :param radius_scale: Radius Scale
@@ -195,6 +199,64 @@ def view_putty(structure: Structure, radius_scale=1.0, width=1200, height=600) -
             "sele": "protein",
             "radius": "bfactor",
             "radiusScale": radius_scale,
+            "color": "bfactor",
+            "colorScale": "RdYlBu"
+        }}
+    ]
+    view.layout.width = 'auto'
+    view.layout.height = 'auto'
+
+    box = Box([view])
+    box.layout.width = f'{width}px'
+    box.layout.height = f'{height}px'
+
+    return box
+
+
+def view_cartoon(structure: Structure, width=1200, height=600) -> Box:
+    """
+        Display PDB structure as a cartoon model
+        :param structure: BioPython PDB Structure class
+        :type structure: Structure
+        :param width: Widget width
+        :type width: int
+        :param height: Widget height
+        :type height: int
+    """
+    view = nv.show_biopython(structure)
+    view.representations = [
+        {"type": "cartoon",
+         "params": {
+            "sele": "protein",
+            "color": "bfactor",
+            "colorScale": "RdYlBu"
+        }}
+    ]
+    view.layout.width = 'auto'
+    view.layout.height = 'auto'
+
+    box = Box([view])
+    box.layout.width = f'{width}px'
+    box.layout.height = f'{height}px'
+
+    return box
+
+
+def view_tube(structure: Structure, width=1200, height=600) -> Box:
+    """
+        Display PDB structure as a tube model
+        :param structure: BioPython PDB Structure class
+        :type structure: Structure
+        :param width: Widget width
+        :type width: int
+        :param height: Widget height
+        :type height: int
+    """
+    view = nv.show_biopython(structure)
+    view.representations = [
+        {"type": "tube",
+         "params": {
+            "sele": "protein",
             "color": "bfactor",
             "colorScale": "RdYlBu"
         }}

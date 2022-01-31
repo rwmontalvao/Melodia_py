@@ -1,10 +1,16 @@
 # Melodia
-## Differential Geometry of Protein Backbones
+## Protein Structure Analysis
 
-**Melodia** is a python based library for computing Differential Geometry
-of protein structures (backbones). 
+**Melodia** is a Python library for computing Differential Geometry
+and Knot Theory descriptors of protein structures. 
 
-## Installation
+## Installation [Anaconda Python](https://www.anaconda.com/products/individual)
+
+We recommend using [Mamba](https://github.com/mamba-org/mamba) for installation.
+
+```shell
+conda install mamba -n base -c conda-forge
+```
 It is recommended the creation of a new environment for **Melodia**.
 
 ```shell
@@ -15,29 +21,15 @@ conda activate melodia
 **Melodia** requires [Jupyterlab](https://jupyter.org/) and [NGL Viewer](https://github.com/nglviewer/nglview).
 
 ```shell
-conda install jupyterlab
-conda install nglview -c conda-forge
-```
-
-or using [Mamba](https://github.com/mamba-org/mamba)
-
-```shell
 mamba install jupyterlab
 mamba install nglview -c conda-forge
 ```
 
-
-The examples need [seaborn](https://seaborn.pydata.org/) and [scikit-learn](https://scikit-learn.org/stable).
-
-```shell
-conda install -c conda-forge seaborn
-conda install -c conda-forge scikit-learn
-```
-
-or
+The examples need [seaborn](https://seaborn.pydata.org/), [pyarrow](https://github.com/apache/arrow) and [scikit-learn](https://scikit-learn.org/stable).
 
 ```shell
 mamba install -c conda-forge seaborn
+mamba install -c conda-forge pyarrow
 mamba install -c conda-forge scikit-learn
 ```
 
@@ -52,6 +44,7 @@ python setup.py install
 
 ### References
 - Montalvão R, Smith R, Lovell S, Blundell T: CHORAL: a differential geometry approach to the prediction of the cores of protein structures. Bioinformatics. 2005, 21: 3719-3725.
+- Chang PL, Rinne AW, Dewey TG: Structure alignment based on coding of local geometric measures. BMC Bioinformatics. 2006, 7:346.
 - Leung H, Montaño B, Blundell T, Vendruscolo M, Montalvão R: ARABESQUE: A tool for protein structural comparison using differential geometry and knot theory. World Res J Peptide Protein. 2012, 1: 33-40.
 - Pitt WR, Montalvão R, Blundell T: Polyphony: superposition independent methods for ensemble-based drug discovery. BMC Bioinformatics. 2014, 15:324 
 - Marinho da Silva Neto A, Reghim Silva S, Vendruscolo M, Camilloni C, Montalvão R: A Superposition Free Method for Protein Conformational Ensemble Analyses and Local Clustering Based on a Differential Geometry Representation of Backbone. Proteins: Structure, Function, and Bioinformatics. 2018, 87(4):302-312
