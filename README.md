@@ -22,7 +22,10 @@ conda activate melodia
 
 ```shell
 mamba install jupyterlab
-mamba install nglview -c conda-forge
+```
+
+```shell
+mamba install -c conda-forge nglview
 ```
 
 The examples need [seaborn](https://seaborn.pydata.org/), [pyarrow](https://github.com/apache/arrow) and [scikit-learn](https://scikit-learn.org/stable).
