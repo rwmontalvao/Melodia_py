@@ -14,7 +14,9 @@ conda install mamba -n base -c conda-forge
 It is recommended the creation of a new environment for **Melodia**.
 
 ```shell
-conda create --name melodia python=3.8
+conda create --name melodia python=3.9
+```
+```shell
 conda activate melodia
 ```
 
@@ -28,11 +30,18 @@ mamba install jupyterlab
 mamba install -c conda-forge nglview
 ```
 
-The examples need [seaborn](https://seaborn.pydata.org/), [pyarrow](https://github.com/apache/arrow) and [scikit-learn](https://scikit-learn.org/stable).
+The examples need [dill](https://github.com/uqfoundation/dill), [seaborn](https://seaborn.pydata.org/), [pyarrow](https://github.com/apache/arrow) and [scikit-learn](https://scikit-learn.org/stable).
 
 ```shell
+mamba install -c anaconda dill
+```
+```shell
 mamba install -c conda-forge seaborn
+```
+```shell
 mamba install -c conda-forge pyarrow
+```
+```shell
 mamba install -c conda-forge scikit-learn
 ```
 
