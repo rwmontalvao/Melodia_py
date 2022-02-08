@@ -30,6 +30,9 @@ from Bio.PDB.Structure import Structure
 
 from melodia.geometryparser import GeometryParser
 
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import AgglomerativeClustering
+
 
 def geometry_from_structure_file(file_name: str) -> pd.DataFrame:
     """
@@ -452,3 +455,184 @@ class PropensityTable:
                 break
 
         return score
+
+
+def cluster_alignment(align: Bio.Align.MultipleSeqAlignment, threshold=0.7) -> None:
+    """
+         Cluster the alignments by structural similarity
+         :param align: Protein alignment
+         :type align: Bio.Align.MultipleSeqAlignment
+         :param threshold: similarity threshold
+         :type threshold: float
+    """
+    data = []
+    id2pos = {}
+    for position, record in enumerate(align):
+        if 'structure' in record.description:
+            id2pos[record.id] = position
+            for pair in zip(record.letter_annotations['curvature'], record.letter_annotations['torsion']):
+                data.append(list(pair))
+            record.letter_annotations['cluster'] = [0 for _ in record.seq]
+
+    scaler = StandardScaler()
+    scaler.fit(data)
+
+    clustering = AgglomerativeClustering(distance_threshold=threshold, n_clusters=None)
+    for i in range(align.get_alignment_length()):
+        xy = []
+        tags = []
+        for identity, position in id2pos.items():
+            record = align[position]
+            if record.seq[i] != '-':
+                xy.append([record.letter_annotations['curvature'][i], record.letter_annotations['torsion'][i]])
+                tags.append(identity)
+
+        xy = scaler.transform(xy)
+
+        clusters = clustering.fit_predict(xy)
+
+        map_of_clusters = {pair[0]: pair[1] + 1 for pair in zip(tags, clusters)}
+
+        for identity, position in id2pos.items():
+            record = align[position]
+            if identity in map_of_clusters:
+                record.letter_annotations['cluster'][i] = map_of_clusters[identity]
+                # print(id, record.letter_annotations['cluster'][i])
+
+    return
+
+
+def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str) -> None:
+    """
+         Cluster the alignments by structural similarity
+         :param align: Protein alignment
+         :type align: Bio.Align.MultipleSeqAlignment
+         :param ps_file: post-script file name
+         :type ps_file: str
+    """
+    rgb = ['0.50 0.50 0.50',
+           '1.00 0.00 0.00',
+           '1.00 0.64 0.00',
+           '1.00 0.84 0.00',
+           '0.83 0.83 0.00',
+           '0.00 1.00 0.00',
+           '0.00 1.00 1.00',
+           '0.00 0.00 1.00',
+           '0.50 0.00 0.50',
+           '1.00 0.00 1.00',
+           '0.00 0.50 0.00',
+           '1.00 0.41 0.71',
+           '1.00 0.75 0.80',
+           '0.93 0.51 0.93',
+           '1.00 0.85 0.73',
+           '0.18 0.55 0.34',
+           '0.37 0.62 0.62',
+           '0.94 0.90 0.55',
+           '0.53 0.81 0.92',
+           '0.13 0.55 0.13',
+           '0.00 0.00 0.55',
+           '0.55 0.00 0.55',
+           '0.00 0.55 0.55',
+           '0.00 0.00 0.00',
+           '0.65 0.16 0.16',
+           '0.33 0.00 0.67']
+
+    out_file = f'{ps_file}.ps'
+    with open(out_file, 'w') as ps:
+        ps.write('%%!PS-Adobe-3.0\n')
+        ps.write('%%%%Pages: 1\n')
+        ps.write('%%%%Creator: Choral 1.0\n')
+        ps.write('%%%%CreationDate:\n')
+        ps.write('%%%%EndComments\n')
+        ps.write('%%%%Page: 1 1\n')
+        ps.write('/Courier-Regular findfont  16.0 scalefont  setfont\n')
+        ps.write('0.00 0.00 0.83 setrgbcolor\n')
+        ps.write(f'72.0 735.0 moveto ({out_file}) show\n')
+
+        lin = 705.0
+
+        length = align.get_alignment_length()
+
+        count = len(align)
+
+        tot = int(length / 50)
+        block = count + 4
+        bpp = int(76 / block) + 1
+        bcks = 0
+
+        pos = 10
+        page = 1
+
+        for j in range(tot + 1):
+            ini = 0 + 50 * j
+            end = 49 + 50 * j
+
+            if end >= length:
+                end = length - 1
+
+            col = 203.0
+
+            ps.write('/Courier-Regular findfont  8.0 scalefont  setfont\n')
+            ps.write('0.00 0.00 0.83 setrgbcolor\n')
+
+            for k in range(1, 6):
+                if pos < 100:
+                    ps.write('%5.1f %5.1f moveto (%d) show\n' % (col, lin, pos))
+                else:
+                    ps.write('%5.1f %5.1f moveto (%d) show\n' % (col - 2.0, lin, pos))
+
+                pos += 10
+                col += 80.0
+
+                if pos > length:
+                    break
+
+            i = 1
+            for record in align:
+                col = 52.0
+                lin -= 10.0
+                ps.write('/Courier-Regular findfont  10.0 scalefont  setfont\n')
+                ps.write('0.00 0.00 0.00 setrgbcolor\n')
+                ps.write('%5.1f %5.1f moveto (%3d) show\n' % (col, lin, i))
+
+                col += 20.0
+
+                ps.write('%5.1f %5.1f moveto (%s) show\n' % (col, lin, record.id))
+
+                col = 131.1
+                for cur_res in range(ini, end + 1):
+                    if record.seq[cur_res] == '-':
+                        ps.write('0.00 0.00 0.00 setrgbcolor\n')
+                    else:
+                        if 'structure' in record.description:
+                            k = record.letter_annotations['cluster'][cur_res]
+                            c = k % 25
+                            if c == 0 and k != 0:
+                                c = 25
+                        else:
+                            c = 23
+
+                        ps.write(f'{rgb[c]} setrgbcolor\n')
+
+                    ps.write(f'%5.1f %5.1f moveto (%c) show\n' % (col, lin, record.seq[cur_res]))
+                    col += 8.0
+                i += 1
+
+            lin -= 20.0
+            bcks += 1
+
+            if bcks == bpp and j != tot:
+                bcks = 0
+                lin = 705.0
+                page += 1
+
+                ps.write('showpage\n')
+                ps.write(f'%%%%Page: {page} {page}')
+                ps.write('/Courier-Regular findfont  16.0 scalefont  setfont\n')
+                ps.write('0.00 0.00 0.83 setrgbcolor\n')
+                ps.write(f'72.0 735.0 moveto (out_file) show')
+
+        ps.write('showpage\n')
+
+    return
+
