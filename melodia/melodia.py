@@ -665,6 +665,9 @@ def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str, palett
     pal = sns.color_palette(palette, colours)
     rgb = [f'{c[0]:4.2f} {c[1]:4.2f} {c[2]:4.2f}' for c in pal]
 
+    black = '0.00 0.00 0.00'
+    grey = '0.50 0.50 0.50'
+
     out_file = f'{ps_file}.ps'
     with open(out_file, 'w') as ps:
         ps.write('%%!PS-Adobe-3.0\n')
@@ -728,19 +731,41 @@ def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str, palett
                 ps.write('%5.1f %5.1f moveto (%s) show\n' % (col, lin, record.id))
 
                 col = 131.1
+                bold = False
+                last_color = black
                 for cur_res in range(ini, end + 1):
                     if record.seq[cur_res] == '-':
-                        ps.write('0.00 0.00 0.00 setrgbcolor\n')
+                        if bold:
+                            bold = False
+                            ps.write('/Courier-Regular findfont  10.0 scalefont  setfont\n')
+                        if last_color != black:
+                            last_color = black
+                            ps.write(f'{last_color} setrgbcolor\n')
                     else:
                         if 'structure' in record.description:
                             k = record.letter_annotations['cluster'][cur_res]
                             if k >= 0:
                                 c = k % colours
-                                ps.write(f'{rgb[c]} setrgbcolor\n')
+                                if not bold:
+                                    bold = True
+                                    ps.write('/Courier-Bold findfont  10.0 scalefont  setfont\n')
+                                if last_color != rgb[c]:
+                                    last_color = rgb[c]
+                                    ps.write(f'{last_color} setrgbcolor\n')
                             else:
-                                ps.write('0.50 0.50 0.50 setrgbcolor\n')
+                                if bold:
+                                    bold = False
+                                    ps.write('/Courier-Regular findfont  10.0 scalefont  setfont\n')
+                                if last_color != grey:
+                                    last_color = grey
+                                    ps.write(f'{last_color} setrgbcolor\n')
                         else:
-                            ps.write('0.00 0.00 0.00 setrgbcolor\n')
+                            if bold:
+                                bold = False
+                                ps.write('/Courier-Regular findfont  10.0 scalefont  setfont\n')
+                            if last_color != black:
+                                last_color = black
+                                ps.write(f'{last_color} setrgbcolor\n')
                     if 'structure' in record.description:
                         if record.letter_annotations['cluster'][cur_res] < 0:
                             ps.write(f'%5.1f %5.1f moveto (%c) show\n' % (col, lin, record.seq[cur_res].lower()))
@@ -760,10 +785,10 @@ def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str, palett
                 page += 1
 
                 ps.write('showpage\n')
-                ps.write(f'%%%%Page: {page} {page}')
+                ps.write(f'%%%%Page: {page} {page}\n')
                 ps.write('/Courier-Regular findfont  16.0 scalefont  setfont\n')
                 ps.write('0.00 0.00 0.83 setrgbcolor\n')
-                ps.write(f'72.0 735.0 moveto (out_file) show')
+                ps.write(f'72.0 735.0 moveto (out_file) show\n')
 
         ps.write('showpage\n')
 
