@@ -7,542 +7,127 @@ load 1teha.pdb
 load 2ohxa.pdb
 load 3huda.pdb
 
-# non-conserved cluster colour
+# non-conserved cluster color
 color gray40
 
-# cluster colours
-color 0xfdcd96, 1d1ta and resi 0-1
-
-color 0xde3f2b, 1cdoa and resi 2-2
-color 0xde3f2b, 1d1ta and resi 2-2
-color 0xde3f2b, 2ohxa and resi 2-2
-color 0xde3f2b, 3huda and resi 2-2
-
-color 0xb80604, 1teha and resi 2-2
-
-color 0xfee5c3, 1cdoa and resi 3-3
-color 0xfee5c3, 1d1ta and resi 3-3
-
-color 0xfdcd96, 1teha and resi 3-3
-color 0xfdcd96, 2ohxa and resi 3-3
-color 0xfdcd96, 3huda and resi 3-3
-
-color 0xfda872, 1cdoa and resi 4-4
-color 0xfda872, 2ohxa and resi 4-4
-color 0xfda872, 3huda and resi 4-4
-
-color 0xf4764f, 1d1ta and resi 4-4
-color 0xf4764f, 1teha and resi 4-4
-
-color 0xde3f2b, 1cdoa and resi 5-5
-color 0xde3f2b, 1d1ta and resi 5-5
-color 0xde3f2b, 1teha and resi 5-5
-color 0xde3f2b, 2ohxa and resi 5-5
-
-color 0xb80604, 3huda and resi 5-5
-
-color 0xfee5c3, 1cdoa and resi 6-6
-color 0xfee5c3, 1d1ta and resi 6-6
-color 0xfee5c3, 3huda and resi 6-6
-
-color 0xfdcd96, 1teha and resi 6-6
-color 0xfdcd96, 2ohxa and resi 6-6
-
-color 0xfda872, 1cdoa and resi 7-12
-color 0xfda872, 1d1ta and resi 7-12
-color 0xfda872, 1teha and resi 7-12
-color 0xfda872, 2ohxa and resi 7-12
-color 0xfda872, 3huda and resi 7-12
-
-color 0xf4764f, 1cdoa and resi 13-13
-color 0xf4764f, 1teha and resi 13-13
-color 0xf4764f, 2ohxa and resi 13-13
-
-color 0xde3f2b, 1d1ta and resi 13-13
-color 0xde3f2b, 3huda and resi 13-13
-
-color 0xb80604, 1cdoa and resi 14-14
-color 0xb80604, 1d1ta and resi 14-14
-color 0xb80604, 1teha and resi 14-14
-color 0xb80604, 2ohxa and resi 14-14
-
-color 0xfee5c3, 3huda and resi 14-14
-
-color 0xfdcd96, 1cdoa and resi 15-19
-color 0xfdcd96, 1d1ta and resi 15-19
-color 0xfdcd96, 1teha and resi 15-19
-color 0xfdcd96, 2ohxa and resi 15-19
-color 0xfdcd96, 3huda and resi 15-19
-
-color 0xfda872, 1cdoa and resi 20-20
-color 0xfda872, 1d1ta and resi 20-20
-color 0xfda872, 2ohxa and resi 20-20
-color 0xfda872, 3huda and resi 20-20
-
-color 0xf4764f, 1teha and resi 20-20
-
-color 0xde3f2b, 1cdoa and resi 21-21
-color 0xde3f2b, 1d1ta and resi 21-21
-color 0xde3f2b, 1teha and resi 21-21
-color 0xde3f2b, 2ohxa and resi 21-21
-color 0xde3f2b, 3huda and resi 21-21
-
-color 0xb80604, 1cdoa and resi 22-22
-color 0xb80604, 1d1ta and resi 22-22
-color 0xb80604, 1teha and resi 22-22
-color 0xb80604, 2ohxa and resi 22-22
-
-color 0xfee5c3, 3huda and resi 22-22
-
-color 0xfdcd96, 1cdoa and resi 23-43
-color 0xfdcd96, 1d1ta and resi 23-43
-color 0xfdcd96, 1teha and resi 23-43
-color 0xfdcd96, 2ohxa and resi 23-43
-color 0xfdcd96, 3huda and resi 23-43
-
-color 0xfda872, 1cdoa and resi 44-44
-color 0xfda872, 1teha and resi 44-44
-
-color 0xf4764f, 1d1ta and resi 44-44
-color 0xf4764f, 2ohxa and resi 44-44
-color 0xf4764f, 3huda and resi 44-44
-
-color 0xde3f2b, 1cdoa and resi 45-52
-color 0xde3f2b, 1d1ta and resi 45-52
-color 0xde3f2b, 1teha and resi 45-52
-color 0xde3f2b, 2ohxa and resi 45-52
-color 0xde3f2b, 3huda and resi 45-52
-
-color 0xb80604, 1cdoa and resi 53-53
-color 0xb80604, 2ohxa and resi 53-53
-color 0xb80604, 3huda and resi 53-53
-
-color 0xfee5c3, 1d1ta and resi 53-53
-color 0xfee5c3, 1teha and resi 53-53
-
-color 0xfdcd96, 1cdoa and resi 54-54
-
-color 0xfda872, 1d1ta and resi 54-54
-color 0xfda872, 1teha and resi 54-54
-color 0xfda872, 2ohxa and resi 54-54
-color 0xfda872, 3huda and resi 54-54
-
-color 0xf4764f, 1cdoa and resi 55-55
-color 0xf4764f, 1d1ta and resi 55-55
-color 0xf4764f, 1teha and resi 55-55
-color 0xf4764f, 2ohxa and resi 55-55
-color 0xf4764f, 3huda and resi 55-55
-
-color 0xde3f2b, 1cdoa and resi 56-58
-
-color 0xb80604, 1d1ta and resi 56-57
-color 0xb80604, 2ohxa and resi 56-57
-color 0xb80604, 3huda and resi 56-57
-
-color 0xfee5c3, 1teha and resi 56-57
-
-color 0xfdcd96, 1d1ta and resi 58-58
-color 0xfdcd96, 1teha and resi 58-58
-color 0xfdcd96, 2ohxa and resi 58-58
-color 0xfdcd96, 3huda and resi 58-58
-
-color 0xfda872, 1cdoa and resi 59-60
-color 0xfda872, 1teha and resi 59-60
-
-color 0xf4764f, 1d1ta and resi 59-60
-color 0xf4764f, 2ohxa and resi 59-60
-color 0xf4764f, 3huda and resi 59-60
-
-color 0xde3f2b, 1cdoa and resi 61-61
-
-color 0xb80604, 1d1ta and resi 61-61
-color 0xb80604, 1teha and resi 61-61
-color 0xb80604, 2ohxa and resi 61-61
-color 0xb80604, 3huda and resi 61-61
-
-color 0xfee5c3, 1cdoa and resi 62-62
-color 0xfee5c3, 1d1ta and resi 62-62
-
-color 0xfdcd96, 1teha and resi 62-62
-color 0xfdcd96, 2ohxa and resi 62-62
-color 0xfdcd96, 3huda and resi 62-62
-
-color 0xfda872, 1cdoa and resi 63-63
-color 0xfda872, 1d1ta and resi 63-63
-color 0xfda872, 1teha and resi 63-63
-color 0xfda872, 2ohxa and resi 63-63
-color 0xfda872, 3huda and resi 63-63
-
-color 0xf4764f, 1cdoa and resi 64-64
-color 0xf4764f, 1d1ta and resi 64-64
-color 0xf4764f, 3huda and resi 64-64
-
-color 0xde3f2b, 1teha and resi 64-64
-color 0xde3f2b, 2ohxa and resi 64-64
-
-color 0xb80604, 1cdoa and resi 65-65
-color 0xb80604, 1d1ta and resi 65-65
-color 0xb80604, 1teha and resi 65-65
-color 0xb80604, 2ohxa and resi 65-65
-color 0xb80604, 3huda and resi 65-65
-
-color 0xfee5c3, 1cdoa and resi 66-66
-color 0xfee5c3, 2ohxa and resi 66-66
-color 0xfee5c3, 3huda and resi 66-66
-
-color 0xfdcd96, 1d1ta and resi 66-66
-color 0xfdcd96, 1teha and resi 66-66
-
-color 0xfda872, 1cdoa and resi 67-79
-color 0xfda872, 1d1ta and resi 67-79
-color 0xfda872, 1teha and resi 67-79
-color 0xfda872, 2ohxa and resi 67-79
-color 0xfda872, 3huda and resi 67-79
-
-color 0xf4764f, 1cdoa and resi 80-80
-color 0xf4764f, 1d1ta and resi 80-80
-color 0xf4764f, 1teha and resi 80-80
-color 0xf4764f, 2ohxa and resi 80-80
-
-color 0xde3f2b, 3huda and resi 80-80
-
-color 0xb80604, 1cdoa and resi 81-88
-color 0xb80604, 1d1ta and resi 81-88
-color 0xb80604, 1teha and resi 81-88
-color 0xb80604, 2ohxa and resi 81-88
-color 0xb80604, 3huda and resi 81-88
-
-color 0xfee5c3, 1cdoa and resi 89-89
-color 0xfee5c3, 2ohxa and resi 89-89
-
-color 0xfdcd96, 1d1ta and resi 89-89
-color 0xfdcd96, 1teha and resi 89-89
-
-color 0xfda872, 3huda and resi 89-89
-
-color 0xf4764f, 1cdoa and resi 90-91
-color 0xf4764f, 1d1ta and resi 90-91
-color 0xf4764f, 1teha and resi 90-91
-color 0xf4764f, 2ohxa and resi 90-91
-color 0xf4764f, 3huda and resi 90-91
-
-color 0xde3f2b, 1cdoa and resi 92-92
-color 0xde3f2b, 1teha and resi 92-92
-color 0xde3f2b, 3huda and resi 92-92
-
-color 0xb80604, 1d1ta and resi 92-92
-color 0xb80604, 2ohxa and resi 92-92
-
-color 0xfee5c3, 1cdoa and resi 93-94
-color 0xfee5c3, 1d1ta and resi 93-94
-color 0xfee5c3, 1teha and resi 93-94
-color 0xfee5c3, 2ohxa and resi 93-94
-color 0xfee5c3, 3huda and resi 93-94
-
-color 0xfdcd96, 1cdoa and resi 95-95
-color 0xfdcd96, 1teha and resi 95-95
-
-color 0xfda872, 1d1ta and resi 95-95
-color 0xfda872, 2ohxa and resi 95-95
-
-color 0xf4764f, 3huda and resi 95-95
-
-color 0xde3f2b, 1cdoa and resi 96-105
-color 0xde3f2b, 1d1ta and resi 96-105
-color 0xde3f2b, 1teha and resi 96-105
-color 0xde3f2b, 2ohxa and resi 96-105
-color 0xde3f2b, 3huda and resi 96-105
-
-color 0xb80604, 1cdoa and resi 106-106
-color 0xb80604, 1teha and resi 106-106
-
-color 0xfee5c3, 1d1ta and resi 106-106
-color 0xfee5c3, 2ohxa and resi 106-106
-color 0xfee5c3, 3huda and resi 106-106
-
-color 0xfdcd96, 1cdoa and resi 107-107
-color 0xfdcd96, 1d1ta and resi 107-107
-color 0xfdcd96, 1teha and resi 107-107
-color 0xfdcd96, 2ohxa and resi 107-107
-color 0xfdcd96, 3huda and resi 107-107
-
-color 0xfda872, 1cdoa and resi 108-111
-color 0xfda872, 1teha and resi 108-111
-
-color 0xf4764f, 1d1ta and resi 108-111
-color 0xf4764f, 2ohxa and resi 108-111
-color 0xf4764f, 3huda and resi 108-111
-
-color 0xde3f2b, 1cdoa and resi 112-113
-color 0xde3f2b, 1d1ta and resi 112-113
-color 0xde3f2b, 2ohxa and resi 112-113
-color 0xde3f2b, 3huda and resi 112-113
-
-color 0xb80604, 1teha and resi 112-113
-
-color 0xfee5c3, 1cdoa and resi 114-114
-color 0xfee5c3, 1d1ta and resi 114-114
-
-color 0xfdcd96, 1teha and resi 114-114
-color 0xfdcd96, 2ohxa and resi 114-114
-color 0xfdcd96, 3huda and resi 114-114
-
-color 0xfda872, 1cdoa and resi 115-116
-color 0xfda872, 1d1ta and resi 115-116
-color 0xfda872, 1teha and resi 115-116
-color 0xfda872, 2ohxa and resi 115-116
-color 0xfda872, 3huda and resi 115-116
-
-color 0xf4764f, 1cdoa and resi 117-117
-color 0xf4764f, 1teha and resi 117-117
-color 0xf4764f, 2ohxa and resi 117-117
-color 0xf4764f, 3huda and resi 117-117
-
-color 0xde3f2b, 1d1ta and resi 117-117
-
-color 0xb80604, 1cdoa and resi 118-118
-color 0xb80604, 1teha and resi 118-118
-
-color 0xfee5c3, 1d1ta and resi 118-118
-color 0xfee5c3, 2ohxa and resi 118-118
-color 0xfee5c3, 3huda and resi 118-118
-
-color 0xfdcd96, 1cdoa and resi 119-119
-color 0xfdcd96, 1d1ta and resi 119-119
-color 0xfdcd96, 1teha and resi 119-119
-
-color 0xfda872, 2ohxa and resi 119-119
-color 0xfda872, 3huda and resi 119-119
-
-color 0xf4764f, 1cdoa and resi 120-120
-color 0xf4764f, 1teha and resi 120-120
-
-color 0xde3f2b, 1d1ta and resi 120-120
-color 0xde3f2b, 2ohxa and resi 120-120
-color 0xde3f2b, 3huda and resi 120-120
-
-color 0xb80604, 1cdoa and resi 121-121
-color 0xb80604, 1d1ta and resi 121-121
-color 0xb80604, 1teha and resi 121-121
-color 0xb80604, 2ohxa and resi 121-121
-color 0xb80604, 3huda and resi 121-121
-
-color 0xfee5c3, 1cdoa and resi 122-126
-
-color 0xfdcd96, 1d1ta and resi 122-126
-color 0xfdcd96, 1teha and resi 122-126
-color 0xfdcd96, 2ohxa and resi 122-126
-color 0xfdcd96, 3huda and resi 122-126
-
-color 0xfda872, 1cdoa and resi 127-127
-color 0xfda872, 1d1ta and resi 127-127
-color 0xfda872, 1teha and resi 127-127
-color 0xfda872, 2ohxa and resi 127-127
-color 0xfda872, 3huda and resi 127-127
-
-color 0xf4764f, 1cdoa and resi 128-128
-
-color 0xde3f2b, 1d1ta and resi 128-128
-color 0xde3f2b, 1teha and resi 128-128
-color 0xde3f2b, 2ohxa and resi 128-128
-color 0xde3f2b, 3huda and resi 128-128
-
-color 0xb80604, 1cdoa and resi 129-260
-color 0xb80604, 1d1ta and resi 129-260
-color 0xb80604, 1teha and resi 129-260
-color 0xb80604, 2ohxa and resi 129-260
-color 0xb80604, 3huda and resi 129-260
-
-color 0xfee5c3, 1cdoa and resi 261-263
-color 0xfee5c3, 1teha and resi 261-263
-color 0xfee5c3, 2ohxa and resi 261-263
-color 0xfee5c3, 3huda and resi 261-263
-
-color 0xfdcd96, 1d1ta and resi 261-263
-
-color 0xfda872, 1cdoa and resi 264-283
-color 0xfda872, 1d1ta and resi 264-283
-color 0xfda872, 1teha and resi 264-283
-color 0xfda872, 2ohxa and resi 264-283
-color 0xfda872, 3huda and resi 264-283
-
-color 0xf4764f, 1cdoa and resi 284-284
-color 0xf4764f, 1teha and resi 284-284
-
-color 0xde3f2b, 1d1ta and resi 284-284
-color 0xde3f2b, 2ohxa and resi 284-284
-color 0xde3f2b, 3huda and resi 284-284
-
-color 0xb80604, 1cdoa and resi 285-289
-color 0xb80604, 1d1ta and resi 285-289
-color 0xb80604, 1teha and resi 285-289
-color 0xb80604, 2ohxa and resi 285-289
-color 0xb80604, 3huda and resi 285-289
-
-color 0xfee5c3, 1cdoa and resi 290-290
-
-color 0xfdcd96, 1d1ta and resi 290-290
-color 0xfdcd96, 1teha and resi 290-290
-color 0xfdcd96, 2ohxa and resi 290-290
-color 0xfdcd96, 3huda and resi 290-290
-
-color 0xfda872, 1cdoa and resi 291-294
-color 0xfda872, 1d1ta and resi 291-294
-color 0xfda872, 1teha and resi 291-294
-color 0xfda872, 2ohxa and resi 291-294
-color 0xfda872, 3huda and resi 291-294
-
-color 0xf4764f, 1cdoa and resi 295-297
-
-color 0xde3f2b, 1d1ta and resi 295-297
-color 0xde3f2b, 1teha and resi 295-297
-color 0xde3f2b, 2ohxa and resi 295-297
-color 0xde3f2b, 3huda and resi 295-297
-
-color 0xb80604, 1cdoa and resi 298-299
-color 0xb80604, 1d1ta and resi 298-299
-color 0xb80604, 1teha and resi 298-299
-color 0xb80604, 2ohxa and resi 298-299
-color 0xb80604, 3huda and resi 298-299
-
-color 0xfee5c3, 1cdoa and resi 300-300
-
-color 0xfdcd96, 1d1ta and resi 300-301
-
-color 0xfda872, 1teha and resi 300-300
-color 0xfda872, 3huda and resi 300-300
-
-color 0xf4764f, 2ohxa and resi 300-301
-
-color 0xde3f2b, 1cdoa and resi 301-301
-color 0xde3f2b, 1teha and resi 301-301
-
-color 0xb80604, 3huda and resi 301-301
-
-color 0xfee5c3, 1cdoa and resi 302-303
-color 0xfee5c3, 1d1ta and resi 302-303
-color 0xfee5c3, 1teha and resi 302-303
-color 0xfee5c3, 2ohxa and resi 302-303
-color 0xfee5c3, 3huda and resi 302-303
-
-color 0xfdcd96, 1cdoa and resi 304-304
-color 0xfdcd96, 1teha and resi 304-304
-
-color 0xfda872, 1d1ta and resi 304-304
-color 0xfda872, 2ohxa and resi 304-304
-color 0xfda872, 3huda and resi 304-304
-
-color 0xf4764f, 1cdoa and resi 305-312
-color 0xf4764f, 1d1ta and resi 305-312
-color 0xf4764f, 1teha and resi 305-312
-color 0xf4764f, 2ohxa and resi 305-312
-color 0xf4764f, 3huda and resi 305-312
-
-color 0xde3f2b, 1cdoa and resi 313-313
-color 0xde3f2b, 1teha and resi 313-313
-
-color 0xb80604, 1d1ta and resi 313-313
-color 0xb80604, 2ohxa and resi 313-313
-color 0xb80604, 3huda and resi 313-313
-
-color 0xfee5c3, 1cdoa and resi 314-314
-color 0xfee5c3, 1teha and resi 314-314
-color 0xfee5c3, 2ohxa and resi 314-314
-color 0xfee5c3, 3huda and resi 314-314
-
-color 0xfdcd96, 1d1ta and resi 314-314
-
-color 0xfda872, 1cdoa and resi 315-315
-color 0xfda872, 1d1ta and resi 315-315
-color 0xfda872, 1teha and resi 315-315
-color 0xfda872, 2ohxa and resi 315-315
-color 0xfda872, 3huda and resi 315-315
-
-color 0xf4764f, 1cdoa and resi 316-317
-
-color 0xde3f2b, 1d1ta and resi 316-316
-
-color 0xb80604, 1teha and resi 316-316
-color 0xb80604, 2ohxa and resi 316-316
-
-color 0xfee5c3, 3huda and resi 316-316
-
-color 0xfdcd96, 1d1ta and resi 317-317
-color 0xfdcd96, 1teha and resi 317-317
-
-color 0xfda872, 2ohxa and resi 317-317
-color 0xfda872, 3huda and resi 317-317
-
-color 0xf4764f, 1cdoa and resi 318-322
-color 0xf4764f, 1d1ta and resi 318-322
-color 0xf4764f, 1teha and resi 318-322
-color 0xf4764f, 2ohxa and resi 318-322
-color 0xf4764f, 3huda and resi 318-322
-
-color 0xde3f2b, 1cdoa and resi 323-323
-color 0xde3f2b, 1teha and resi 323-323
-
-color 0xb80604, 1d1ta and resi 323-323
-color 0xb80604, 2ohxa and resi 323-323
-color 0xb80604, 3huda and resi 323-323
-
-color 0xfee5c3, 1cdoa and resi 324-340
-color 0xfee5c3, 1d1ta and resi 324-340
-color 0xfee5c3, 1teha and resi 324-340
-color 0xfee5c3, 2ohxa and resi 324-340
-color 0xfee5c3, 3huda and resi 324-340
-
-color 0xfdcd96, 1cdoa and resi 341-342
-color 0xfdcd96, 1teha and resi 341-342
-
-color 0xfda872, 1d1ta and resi 341-342
-color 0xfda872, 2ohxa and resi 341-342
-color 0xfda872, 3huda and resi 341-342
-
-color 0xf4764f, 1cdoa and resi 343-348
-color 0xf4764f, 1d1ta and resi 343-348
-color 0xf4764f, 1teha and resi 343-348
-color 0xf4764f, 2ohxa and resi 343-348
-color 0xf4764f, 3huda and resi 343-348
-
-color 0xde3f2b, 1cdoa and resi 349-349
-
-color 0xb80604, 1d1ta and resi 349-349
-color 0xb80604, 1teha and resi 349-349
-color 0xb80604, 2ohxa and resi 349-349
-color 0xb80604, 3huda and resi 349-349
-
-color 0xfee5c3, 1cdoa and resi 350-369
-color 0xfee5c3, 1d1ta and resi 350-369
-color 0xfee5c3, 1teha and resi 350-369
-color 0xfee5c3, 2ohxa and resi 350-369
-color 0xfee5c3, 3huda and resi 350-369
-
-color 0xfdcd96, 1cdoa and resi 370-370
-color 0xfdcd96, 1teha and resi 370-370
-color 0xfdcd96, 2ohxa and resi 370-370
-color 0xfdcd96, 3huda and resi 370-370
-
-color 0xfda872, 1d1ta and resi 370-370
-
-color 0xf4764f, 1cdoa and resi 371-371
-color 0xf4764f, 2ohxa and resi 371-371
-
-color 0xde3f2b, 1d1ta and resi 371-371
-color 0xde3f2b, 1teha and resi 371-371
-
-color 0xb80604, 3huda and resi 371-371
-
-color 0xfee5c3, 1cdoa and resi 372-372
-color 0xfee5c3, 1d1ta and resi 372-372
-color 0xfee5c3, 1teha and resi 372-372
-color 0xfee5c3, 2ohxa and resi 372-372
-color 0xfee5c3, 3huda and resi 372-372
-
-color 0xfdcd96, 1cdoa and resi 373-374
-color 0xfdcd96, 1teha and resi 373-374
-
-color 0xfda872, 1d1ta and resi 373-374
-color 0xfda872, 2ohxa and resi 373-374
-color 0xfda872, 3huda and resi 373-374
+# cluster colors
+color 0xd95f02, 1cdoa and resi 15-19
+color 0xd95f02, 1d1ta and resi 15-19
+color 0xd95f02, 1teha and resi 15-19
+color 0xd95f02, 2ohxa and resi 15-19
+color 0xd95f02, 3huda and resi 15-19
+
+color 0x7570b3, 1cdoa and resi 23-43
+color 0x7570b3, 1d1ta and resi 23-43
+color 0x7570b3, 1teha and resi 23-43
+color 0x7570b3, 2ohxa and resi 23-43
+color 0x7570b3, 3huda and resi 23-43
+
+color 0xe7298a, 1cdoa and resi 45-52
+color 0xe7298a, 1d1ta and resi 45-52
+color 0xe7298a, 1teha and resi 45-52
+color 0xe7298a, 2ohxa and resi 45-52
+color 0xe7298a, 3huda and resi 45-52
+
+color 0x66a61e, 1cdoa and resi 56-58
+
+color 0xe6ab02, 1cdoa and resi 67-79
+color 0xe6ab02, 1d1ta and resi 67-79
+color 0xe6ab02, 1teha and resi 67-79
+color 0xe6ab02, 2ohxa and resi 67-79
+color 0xe6ab02, 3huda and resi 67-79
+
+color 0xa6761d, 1cdoa and resi 81-88
+color 0xa6761d, 1d1ta and resi 81-88
+color 0xa6761d, 1teha and resi 81-88
+color 0xa6761d, 2ohxa and resi 81-88
+color 0xa6761d, 3huda and resi 81-88
+
+color 0x1b9e77, 1cdoa and resi 96-105
+color 0x1b9e77, 1d1ta and resi 96-105
+color 0x1b9e77, 1teha and resi 96-105
+color 0x1b9e77, 2ohxa and resi 96-105
+color 0x1b9e77, 3huda and resi 96-105
+
+color 0xd95f02, 1cdoa and resi 108-111
+color 0xd95f02, 1teha and resi 108-111
+
+color 0x7570b3, 1d1ta and resi 108-111
+color 0x7570b3, 2ohxa and resi 108-111
+color 0x7570b3, 3huda and resi 108-111
+
+color 0xe7298a, 1cdoa and resi 122-126
+
+color 0x66a61e, 1d1ta and resi 122-126
+color 0x66a61e, 1teha and resi 122-126
+color 0x66a61e, 2ohxa and resi 122-126
+color 0x66a61e, 3huda and resi 122-126
+
+color 0xe6ab02, 1cdoa and resi 129-260
+color 0xe6ab02, 1d1ta and resi 129-260
+color 0xe6ab02, 1teha and resi 129-260
+color 0xe6ab02, 2ohxa and resi 129-260
+color 0xe6ab02, 3huda and resi 129-260
+
+color 0xa6761d, 1cdoa and resi 261-263
+color 0xa6761d, 1teha and resi 261-263
+color 0xa6761d, 2ohxa and resi 261-263
+color 0xa6761d, 3huda and resi 261-263
+
+color 0x1b9e77, 1d1ta and resi 261-263
+
+color 0xd95f02, 1cdoa and resi 264-283
+color 0xd95f02, 1d1ta and resi 264-283
+color 0xd95f02, 1teha and resi 264-283
+color 0xd95f02, 2ohxa and resi 264-283
+color 0xd95f02, 3huda and resi 264-283
+
+color 0x7570b3, 1cdoa and resi 285-289
+color 0x7570b3, 1d1ta and resi 285-289
+color 0x7570b3, 1teha and resi 285-289
+color 0x7570b3, 2ohxa and resi 285-289
+color 0x7570b3, 3huda and resi 285-289
+
+color 0xe7298a, 1cdoa and resi 291-294
+color 0xe7298a, 1d1ta and resi 291-294
+color 0xe7298a, 1teha and resi 291-294
+color 0xe7298a, 2ohxa and resi 291-294
+color 0xe7298a, 3huda and resi 291-294
+
+color 0x66a61e, 1cdoa and resi 295-297
+
+color 0xe6ab02, 1d1ta and resi 295-297
+color 0xe6ab02, 1teha and resi 295-297
+color 0xe6ab02, 2ohxa and resi 295-297
+color 0xe6ab02, 3huda and resi 295-297
+
+color 0xa6761d, 1cdoa and resi 305-312
+color 0xa6761d, 1d1ta and resi 305-312
+color 0xa6761d, 1teha and resi 305-312
+color 0xa6761d, 2ohxa and resi 305-312
+color 0xa6761d, 3huda and resi 305-312
+
+color 0x1b9e77, 1cdoa and resi 318-322
+color 0x1b9e77, 1d1ta and resi 318-322
+color 0x1b9e77, 1teha and resi 318-322
+color 0x1b9e77, 2ohxa and resi 318-322
+color 0x1b9e77, 3huda and resi 318-322
+
+color 0xd95f02, 1cdoa and resi 324-340
+color 0xd95f02, 1d1ta and resi 324-340
+color 0xd95f02, 1teha and resi 324-340
+color 0xd95f02, 2ohxa and resi 324-340
+color 0xd95f02, 3huda and resi 324-340
+
+color 0x7570b3, 1cdoa and resi 343-348
+color 0x7570b3, 1d1ta and resi 343-348
+color 0x7570b3, 1teha and resi 343-348
+color 0x7570b3, 2ohxa and resi 343-348
+color 0x7570b3, 3huda and resi 343-348
+
+color 0xe7298a, 1cdoa and resi 350-369
+color 0xe7298a, 1d1ta and resi 350-369
+color 0xe7298a, 1teha and resi 350-369
+color 0xe7298a, 2ohxa and resi 350-369
+color 0xe7298a, 3huda and resi 350-369
 
