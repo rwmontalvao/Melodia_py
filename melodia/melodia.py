@@ -15,13 +15,16 @@
 # Author: Rinaldo Wander Montalvão, PhD
 #
 import os
+from typing_extensions import SupportsIndex
+
 import Bio.Align
 import pkg_resources
 
 import pandas as pd
 import nglview as nv
+import seaborn as sns
 
-from typing import Dict
+from typing import Dict, Tuple, List, Any
 from ipywidgets import Box
 
 from Bio import AlignIO
@@ -199,12 +202,12 @@ def view_putty(structure: Structure, radius_scale=1.0, width=1200, height=600) -
     view.representations = [
         {"type": "tube",
          "params": {
-            "sele": "protein",
-            "radius": "bfactor",
-            "radiusScale": radius_scale,
-            "color": "bfactor",
-            "colorScale": "RdYlBu"
-        }}
+             "sele": "protein",
+             "radius": "bfactor",
+             "radiusScale": radius_scale,
+             "color": "bfactor",
+             "colorScale": "RdYlBu"
+         }}
     ]
     view.layout.width = 'auto'
     view.layout.height = 'auto'
@@ -230,10 +233,10 @@ def view_cartoon(structure: Structure, width=1200, height=600) -> Box:
     view.representations = [
         {"type": "cartoon",
          "params": {
-            "sele": "protein",
-            "color": "bfactor",
-            "colorScale": "RdYlBu"
-        }}
+             "sele": "protein",
+             "color": "bfactor",
+             "colorScale": "RdYlBu"
+         }}
     ]
     view.layout.width = 'auto'
     view.layout.height = 'auto'
@@ -259,10 +262,10 @@ def view_tube(structure: Structure, width=1200, height=600) -> Box:
     view.representations = [
         {"type": "tube",
          "params": {
-            "sele": "protein",
-            "color": "bfactor",
-            "colorScale": "RdYlBu"
-        }}
+             "sele": "protein",
+             "color": "bfactor",
+             "colorScale": "RdYlBu"
+         }}
     ]
     view.layout.width = 'auto'
     view.layout.height = 'auto'
@@ -315,7 +318,7 @@ def parser_pir_file(pir_file: str) -> Bio.Align.MultipleSeqAlignment:
             if letter != '-':
                 res_code = c321[geo[f'0:{chain}'].residues[j].name]
                 if letter != res_code:
-                    raise NameError(f'Alignment error: res={i+1} seq={letter} pdb={res_code}')
+                    raise NameError(f'Alignment error: res={i + 1} seq={letter} pdb={res_code}')
                 curvature.append(geo[f'0:{chain}'].residues[j].curvature)
                 torsion.append(geo[f'0:{chain}'].residues[j].torsion)
                 arc_length.append(geo[f'0:{chain}'].residues[j].arc_len)
@@ -376,6 +379,7 @@ class PropensityTable:
         """
         Load the Propensity Table data
         """
+
         def find_block():
             found = False
             while self.__ini < self.__end:
@@ -457,13 +461,15 @@ class PropensityTable:
         return score
 
 
-def cluster_alignment(align: Bio.Align.MultipleSeqAlignment, threshold=0.7) -> None:
+def cluster_alignment(align: Bio.Align.MultipleSeqAlignment, threshold=0.7, long=False) -> None:
     """
          Cluster the alignments by structural similarity
          :param align: Protein alignment
          :type align: Bio.Align.MultipleSeqAlignment
          :param threshold: similarity threshold
          :type threshold: float
+         :param long: output only long cluster (length > 3)
+         :type long: bool
     """
     data = []
     id2pos = {}
@@ -491,7 +497,7 @@ def cluster_alignment(align: Bio.Align.MultipleSeqAlignment, threshold=0.7) -> N
 
         clusters = clustering.fit_predict(xy)
 
-        map_of_clusters = {pair[0]: pair[1] + 1 for pair in zip(tags, clusters)}
+        map_of_clusters = {pair[0]: pair[1] for pair in zip(tags, clusters)}
 
         for identity, position in id2pos.items():
             record = align[position]
@@ -499,43 +505,165 @@ def cluster_alignment(align: Bio.Align.MultipleSeqAlignment, threshold=0.7) -> N
                 record.letter_annotations['cluster'][i] = map_of_clusters[identity]
                 # print(id, record.letter_annotations['cluster'][i])
 
+    last_cluster = 0
+    for record in align:
+        if 'structure' not in record.description:
+            continue
+        max_cluster = max(record.letter_annotations['cluster'])
+        if max_cluster > last_cluster:
+            last_cluster = max_cluster
+
+    for i in range(align.get_alignment_length() - 1):
+        j = i + 1
+        left = {}
+        right = {}
+        for k, record in enumerate(align):
+            if 'structure' not in record.description:
+                continue
+
+            ca = record.letter_annotations['cluster'][i]
+            cb = record.letter_annotations['cluster'][j]
+
+            if ca not in left:
+                left[ca] = [k]
+            else:
+                left[ca].append(k)
+
+            if cb not in right:
+                right[cb] = [k]
+            else:
+                right[cb].append(k)
+
+        for key, value in left.items():
+            left[key] = set(value)
+
+        for key, value in right.items():
+            right[key] = set(value)
+
+        for right_key in right:
+            found_key = None
+            for left_key in left:
+                if right[right_key].symmetric_difference(left[left_key]) == set():
+                    found_key = left_key
+
+            if found_key is None:
+                last_cluster += 1
+                for k in right[right_key]:
+                    record = align[k]
+                    record.letter_annotations['cluster'][j] = last_cluster
+            else:
+                for k in right[right_key]:
+                    record = align[k]
+                    record.letter_annotations['cluster'][j] = found_key
+
+    data, idx = get_idx(align)
+
+    if long:
+        last_cluster = 0
+        for j in idx:
+            cluster, ini, end, size = data[j]
+            if size < 3:
+                for i in range(ini, end + 1):
+                    for record in align:
+                        if 'structure' not in record.description:
+                            continue
+                        if record.letter_annotations['cluster'][i] == cluster:
+                            record.letter_annotations['cluster'][i] = -1
+                data[j] = (-1, ini, end, size)
+            else:
+                # print(f'{ini}-{end} {cluster}->{p}')
+                for i in range(ini, end + 1):
+                    for record in align:
+                        if 'structure' not in record.description:
+                            continue
+                        if record.letter_annotations['cluster'][i] == cluster:
+                            record.letter_annotations['cluster'][i] = last_cluster
+
+                data[j] = (last_cluster, ini, end, size)
+                last_cluster += 1
     return
 
 
-def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str) -> None:
+def save_pymol_script(align: Bio.Align.MultipleSeqAlignment, pml_file: str, palette='Dark2', colours=7) -> None:
+    """
+         Cluster the alignments by structural similarity
+         :param align: Protein alignment
+         :type align: Bio.Align.MultipleSeqAlignment
+         :param pml_file: Pymol script file name (pml)
+         :type pml_file: str
+         :param palette: colour palette
+         :type palette: str
+         :param colours: number of colours in the palette
+         :type colours: int
+    """
+    data, idx = get_idx(align)
+
+    pal = sns.color_palette(palette, colours).as_hex()
+    with open(f'{pml_file}.pml', 'w') as f:
+        f.write('# Script generated by Melodia\n\n')
+        f.write('# load structures\n')
+        for record in align:
+            if 'structure' not in record.description:
+                continue
+            f.write(f'load {record.id}.pdb\n')
+        f.write('\n')
+
+        f.write('# non-conserved cluster colour\n')
+        f.write(f'color gray40\n\n')
+        f.write('# cluster colours\n')
+        for i in idx:
+            positions = data[i]
+            cluster, ini, end, size = positions
+            if cluster > 0:
+                for record in align:
+                    if 'structure' not in record.description:
+                        continue
+                    if record.letter_annotations['cluster'][ini] == cluster:
+                        colour = f'0x{pal[cluster % colours][1:]}'
+                        f.write(f'color {colour}, {record.id} and resi {ini}-{end}\n')
+                f.write('\n')
+    return
+
+
+def get_idx(align: Bio.Align.MultipleSeqAlignment) -> Tuple[List[Tuple[Any, int, int, int]], List[SupportsIndex]]:
+    """
+    Internal function for clustering
+    :param align: Protein alignment
+    :return: Indexed clusters
+    """
+    clusters = {}
+    for i, record in enumerate(align):
+        if 'structure' not in record.description:
+            continue
+        for j, cluster in enumerate(record.letter_annotations['cluster']):
+            if cluster not in clusters:
+                clusters[cluster] = [j]
+            else:
+                clusters[cluster].append(j)
+    data = []
+    block_init = []
+    for key, value in clusters.items():
+        data.append((key, min(value), max(value), max(value) - min(value) + 1))
+        block_init.append(min(value))
+    idx = sorted(range(len(block_init)), key=block_init.__getitem__)
+    return data, idx
+
+
+def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str, palette='Dark2', colours=7) -> None:
     """
          Cluster the alignments by structural similarity
          :param align: Protein alignment
          :type align: Bio.Align.MultipleSeqAlignment
          :param ps_file: post-script file name
          :type ps_file: str
+         :param palette: colour palette
+         :type palette: str
+         :param colours: number of colours in the palette
+         :type colours: int
     """
-    rgb = ['0.50 0.50 0.50',
-           '1.00 0.00 0.00',
-           '1.00 0.64 0.00',
-           '1.00 0.84 0.00',
-           '0.83 0.83 0.00',
-           '0.00 1.00 0.00',
-           '0.00 1.00 1.00',
-           '0.00 0.00 1.00',
-           '0.50 0.00 0.50',
-           '1.00 0.00 1.00',
-           '0.00 0.50 0.00',
-           '1.00 0.41 0.71',
-           '1.00 0.75 0.80',
-           '0.93 0.51 0.93',
-           '1.00 0.85 0.73',
-           '0.18 0.55 0.34',
-           '0.37 0.62 0.62',
-           '0.94 0.90 0.55',
-           '0.53 0.81 0.92',
-           '0.13 0.55 0.13',
-           '0.00 0.00 0.55',
-           '0.55 0.00 0.55',
-           '0.00 0.55 0.55',
-           '0.00 0.00 0.00',
-           '0.65 0.16 0.16',
-           '0.33 0.00 0.67']
+
+    pal = sns.color_palette(palette, colours)
+    rgb = [f'{c[0]:4.2f} {c[1]:4.2f} {c[2]:4.2f}' for c in pal]
 
     out_file = f'{ps_file}.ps'
     with open(out_file, 'w') as ps:
@@ -547,7 +675,7 @@ def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str) -> Non
         ps.write('%%%%Page: 1 1\n')
         ps.write('/Courier-Regular findfont  16.0 scalefont  setfont\n')
         ps.write('0.00 0.00 0.83 setrgbcolor\n')
-        ps.write(f'72.0 735.0 moveto ({out_file}) show\n')
+        ps.write(f'72.0 735.0 moveto ({ps_file}) show\n')
 
         lin = 705.0
 
@@ -606,15 +734,20 @@ def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str) -> Non
                     else:
                         if 'structure' in record.description:
                             k = record.letter_annotations['cluster'][cur_res]
-                            c = k % 25
-                            if c == 0 and k != 0:
-                                c = 25
+                            if k >= 0:
+                                c = k % colours
+                                ps.write(f'{rgb[c]} setrgbcolor\n')
+                            else:
+                                ps.write('0.50 0.50 0.50 setrgbcolor\n')
                         else:
-                            c = 23
-
-                        ps.write(f'{rgb[c]} setrgbcolor\n')
-
-                    ps.write(f'%5.1f %5.1f moveto (%c) show\n' % (col, lin, record.seq[cur_res]))
+                            ps.write('0.00 0.00 0.00 setrgbcolor\n')
+                    if 'structure' in record.description:
+                        if record.letter_annotations['cluster'][cur_res] < 0:
+                            ps.write(f'%5.1f %5.1f moveto (%c) show\n' % (col, lin, record.seq[cur_res].lower()))
+                        else:
+                            ps.write(f'%5.1f %5.1f moveto (%c) show\n' % (col, lin, record.seq[cur_res]))
+                    else:
+                        ps.write(f'%5.1f %5.1f moveto (%c) show\n' % (col, lin, record.seq[cur_res].lower()))
                     col += 8.0
                 i += 1
 
@@ -635,4 +768,3 @@ def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str) -> Non
         ps.write('showpage\n')
 
     return
-

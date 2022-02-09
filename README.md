@@ -20,7 +20,7 @@ conda create --name melodia python=3.9
 conda activate melodia
 ```
 
-**Melodia** requires [Jupyterlab](https://jupyter.org/), [NGL Viewer](https://github.com/nglviewer/nglview) and [scikit-learn](https://scikit-learn.org/stable).
+**Melodia** requires [Jupyterlab](https://jupyter.org/), [NGL Viewer](https://github.com/nglviewer/nglview), [scikit-learn](https://scikit-learn.org/stable) and [seaborn](https://seaborn.pydata.org/).
 
 ```shell
 mamba install jupyterlab
@@ -34,13 +34,14 @@ mamba install -c conda-forge nglview
 mamba install -c conda-forge scikit-learn
 ```
 
-The examples need [dill](https://github.com/uqfoundation/dill), [seaborn](https://seaborn.pydata.org/) and [pyarrow](https://github.com/apache/arrow).
+```shell
+mamba install -c conda-forge seaborn
+```
+
+The examples need [dill](https://github.com/uqfoundation/dill) and [pyarrow](https://github.com/apache/arrow).
 
 ```shell
 mamba install -c anaconda dill
-```
-```shell
-mamba install -c conda-forge seaborn
 ```
 ```shell
 mamba install -c conda-forge pyarrow
