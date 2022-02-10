@@ -7,6 +7,12 @@ load 1teha.pdb
 load 2ohxa.pdb
 load 3huda.pdb
 
+# superimpose structures
+super 1d1ta, 1cdoa
+super 1teha, 1cdoa
+super 2ohxa, 1cdoa
+super 3huda, 1cdoa
+
 # non-conserved cluster color
 color gray40
 
