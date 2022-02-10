@@ -621,13 +621,13 @@ def save_pymol_script(align: Bio.Align.MultipleSeqAlignment, pml_file: str, pale
         for i in idx:
             positions = data[i]
             cluster, ini, end, size = positions
-            if cluster > 0:
+            if cluster >= 0:
                 for record in align:
                     if 'structure' not in record.description:
                         continue
                     if record.letter_annotations['cluster'][ini] == cluster:
                         colour = f'0x{pal[cluster % colors][1:]}'
-                        f.write(f'color {colour}, {record.id} and resi {ini}-{end}\n')
+                        f.write(f'color {colour}, {record.id} and resi {ini+1}-{end+1}\n')
                 f.write('\n')
     return
 
