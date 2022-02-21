@@ -416,7 +416,11 @@ class GeometryParser:
             if het_flag[0] != " ":
                 continue
 
-            coord = residue["CA"].get_coord()
+            try:
+                coord = residue["CA"].get_coord()
+            except KeyError:
+                print(f'ERROR: missing CA atom at {residue.get_resname()} - {residue.get_full_id()}!')
+                raise
 
             t.append(float(num))
             x.append(coord[0])
