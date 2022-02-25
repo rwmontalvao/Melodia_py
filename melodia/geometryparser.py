@@ -521,10 +521,10 @@ class GeometryParser:
         :param deg: angle in degrees?
         :type deg: bool
         """
-        ini = list(chain.get_residues())[+0].id[1]
-        end = list(chain.get_residues())[-2].id[1]
+        idx = [res.id[1] for res in list(chain.get_residues()) if res.id[0] == ' ']
 
-        idx = [res.id[1] for res in list(chain.get_residues())]
+        ini = idx[+0]
+        end = idx[-2]
 
         num = 0
         for i, residue in enumerate(chain):
