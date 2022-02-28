@@ -534,16 +534,26 @@ class GeometryParser:
                 continue
 
             # core atoms
-            atom_n = residue['N'].get_coord()
-            atom_ca = residue['CA'].get_coord()
-            atom_c = residue['C'].get_coord()
+            try:
+                atom_n = residue['N'].get_coord()
+                atom_ca = residue['CA'].get_coord()
+                atom_c = residue['C'].get_coord()
+            except KeyError:
+                pdb, model, chain_id = chain.full_id
+                print(f'Error: Missing N, CA or C atom at [{pos}] {pdb} - {model} - {chain_id}')
+                raise
 
             # phi
             if pos > ini:
                 het_flag, prev_res, insertion_code = chain[idx[i - 1]].id
 
                 if abs(prev_res - pos) <= 1:
-                    p1 = chain[pos - 1]['C'].get_coord()
+                    try:
+                        p1 = chain[idx[i - 1]]['C'].get_coord()
+                    except KeyError:
+                        pdb, model, chain_id = chain.full_id
+                        print(f'Error: Missing C atom at [{idx[i - 1]}] {pdb} - {model} - {chain_id}')
+                        raise
                     p2 = atom_n
                     p3 = atom_ca
                     p4 = atom_c
@@ -561,7 +571,12 @@ class GeometryParser:
                     p1 = atom_n
                     p2 = atom_ca
                     p3 = atom_c
-                    p4 = chain[pos + 1]['N'].get_coord()
+                    try:
+                        p4 = chain[idx[i + 1]]['N'].get_coord()
+                    except KeyError:
+                        pdb, model, chain_id = chain.full_id
+                        print(f'Error: Missing N atom at [{idx[i + 1]}] {pdb} - {model} - {chain_id}')
+                        raise
                     psi = GeometryParser.calc_dihedral_torsion(p1=p1, p2=p2, p3=p3, p4=p4, deg=deg)
                 else:
                     psi = 0.0

@@ -149,7 +149,9 @@ def geometry_dict_from_structure(structure: Structure) -> Dict[str, GeometryPars
         for chain in model.get_list():
             chain_id = chain.id
             key = f'{model.id}:{chain_id}'
-            chains[key] = GeometryParser(chain)
+            residues = [res.id[1] for res in list(chain.get_residues()) if res.id[0] == ' ']
+            if residues:
+                chains[key] = GeometryParser(chain)
 
     return chains
 
@@ -316,9 +318,12 @@ def parser_pir_file(pir_file: str) -> Bio.Align.MultipleSeqAlignment:
         j = 0
         for i, letter in enumerate(record.seq):
             if letter != '-':
-                res_code = c321[geo[f'0:{chain}'].residues[j].name]
+                try:
+                    res_code = c321[geo[f'0:{chain}'].residues[j].name]
+                except KeyError:
+                    raise NameError(f'Alignment error: {record.id} 0:{chain} residue {j}')
                 if letter != res_code:
-                    raise NameError(f'Alignment error: res={i + 1} seq={letter} pdb={res_code}')
+                    raise NameError(f'Alignment error: {record.id} res={i + 1} seq={letter} pdb={res_code}')
                 curvature.append(geo[f'0:{chain}'].residues[j].curvature)
                 torsion.append(geo[f'0:{chain}'].residues[j].torsion)
                 arc_length.append(geo[f'0:{chain}'].residues[j].arc_len)
