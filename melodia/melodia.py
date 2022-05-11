@@ -14,6 +14,8 @@
 #
 # Author: Rinaldo Wander Montalvão, PhD
 #
+# TODO: Better error messages
+#
 import os
 from typing_extensions import SupportsIndex
 
@@ -50,6 +52,7 @@ def geometry_from_structure_file(file_name: str) -> pd.DataFrame:
     parser = PDBParser()
     name, ext = os.path.splitext(file_name)
     structure = parser.get_structure(name, file_name)
+
     base = proc_chains(structure)
 
     return base
@@ -82,8 +85,8 @@ def proc_chains(structure: Structure) -> pd.DataFrame:
     """
     pdb_code = structure.id.upper()
     chains = {}
-    for model in structure.get_list():
-        for chain in model.get_list():
+    for model in structure:
+        for chain in model:
             chain_id = chain.id
             key = f'{pdb_code}:{model.id}:{chain_id}'
             chains[key] = GeometryParser(chain)
@@ -145,8 +148,8 @@ def geometry_dict_from_structure(structure: Structure) -> Dict[str, GeometryPars
          :rtype: Dict[str, GeometryParser]
     """
     chains = {}
-    for model in structure.get_list():
-        for chain in model.get_list():
+    for model in structure:
+        for chain in model:
             chain_id = chain.id
             key = f'{model.id}:{chain_id}'
             residues = [res.id[1] for res in list(chain.get_residues()) if res.id[0] == ' ']
@@ -300,11 +303,21 @@ def parser_pir_file(pir_file: str) -> Bio.Align.MultipleSeqAlignment:
         if record.description[:9] != 'structure':
             continue
 
-        chain = record.description.split(':')[3]
-
         file_name = f'{record.id}.pdb'
 
         structure = parser.get_structure(record.id, file_name)
+
+        # Renumber the residues to start with 1
+        residue_number = 1
+        for model in structure:
+            for chain in model:
+                for residue in chain:
+                    # print(residue.id)
+                    residue.id = (residue.id[0], residue_number, 'Z')
+                    residue_number += 1
+                for residue in chain:
+                    residue.id = (residue.id[0], residue.id[1], ' ')
+                    # print('----', residue.id)
 
         geo = geometry_dict_from_structure(structure)
 
@@ -315,21 +328,27 @@ def parser_pir_file(pir_file: str) -> Bio.Align.MultipleSeqAlignment:
         phi = []
         psi = []
 
+        idx = []
+        for key in geo:
+            for res in geo[key].residues:
+                idx.append((key, res))
         j = 0
         for i, letter in enumerate(record.seq):
-            if letter != '-':
+            if letter != '-' and letter != '/':
                 try:
-                    res_code = c321[geo[f'0:{chain}'].residues[j].name]
+                    curr_chain = idx[j][0]
+                    curr_residue = idx[j][1]
+                    res_code = c321[geo[curr_chain].residues[curr_residue].name]
                 except KeyError:
-                    raise NameError(f'Alignment error: {record.id} 0:{chain} residue {j}')
+                    raise NameError(f'Alignment error: {record.id} {curr_chain} residue {curr_residue + 1} {letter}')
                 if letter != res_code:
                     raise NameError(f'Alignment error: {record.id} res={i + 1} seq={letter} pdb={res_code}')
-                curvature.append(geo[f'0:{chain}'].residues[j].curvature)
-                torsion.append(geo[f'0:{chain}'].residues[j].torsion)
-                arc_length.append(geo[f'0:{chain}'].residues[j].arc_len)
-                writhing.append(geo[f'0:{chain}'].residues[j].writhing)
-                phi.append(geo[f'0:{chain}'].residues[j].phi)
-                psi.append(geo[f'0:{chain}'].residues[j].psi)
+                curvature.append(geo[curr_chain].residues[curr_residue].curvature)
+                torsion.append(geo[curr_chain].residues[curr_residue].torsion)
+                arc_length.append(geo[curr_chain].residues[curr_residue].arc_len)
+                writhing.append(geo[curr_chain].residues[curr_residue].writhing)
+                phi.append(geo[curr_chain].residues[curr_residue].phi)
+                psi.append(geo[curr_chain].residues[curr_residue].psi)
                 j += 1
             else:
                 curvature.append(0.0)
@@ -632,7 +651,7 @@ def save_pymol_script(align: Bio.Align.MultipleSeqAlignment, pml_file: str, pale
                         continue
                     if record.letter_annotations['cluster'][ini] == cluster:
                         colour = f'0x{pal[cluster % colors][1:]}'
-                        f.write(f'color {colour}, {record.id} and resi {ini+1}-{end+1}\n')
+                        f.write(f'color {colour}, {record.id} and resi {ini + 1}-{end + 1}\n')
                 f.write('\n')
     return
 

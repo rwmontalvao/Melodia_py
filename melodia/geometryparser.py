@@ -29,7 +29,7 @@ class ResidueGeometry:
     # Residue information
     name: str = None
     chain: str = None
-    res_num: int = None
+    res_num: str = None
     res_order: int = None
 
     # Differential geometry
@@ -73,7 +73,7 @@ class GeometryParser:
         self.__anomaly_list = GeometryParser.find_anomalies(chain=chain)
 
     @property
-    def residues(self) -> Dict[int, ResidueGeometry]:
+    def residues(self) -> Dict[str, ResidueGeometry]:
         """
         Access to residue geometry
         :return: dataclass for residue geometry
@@ -82,11 +82,11 @@ class GeometryParser:
         return self.__residues
 
     @property
-    def residues_map(self) -> Dict[int, ResidueGeometry]:
+    def residues_map(self) -> Dict[str, ResidueGeometry]:
         """
         Maps residues number
         :return: Dictionary for the residue map
-        :rtype: dict[int, int]
+        :rtype: dict[int, ResidueGeometry]
         """
         return self.__residues_map
 
@@ -565,7 +565,12 @@ class GeometryParser:
 
             # psi
             if pos < end:
-                het_flag, next_res, insertion_code = chain[idx[i + 1]].id
+                try:
+                    het_flag, next_res, insertion_code = chain[idx[i + 1]].id
+                except (IndexError, KeyError):
+                    pdb, model, chain_id = chain.full_id
+                    print(f'Error: after residue [{idx[i]}] {pdb} - {model} - {chain_id}')
+                    raise
 
                 if abs(next_res - pos) <= 1:
                     p1 = atom_n
