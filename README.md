@@ -38,6 +38,7 @@ python setup.py install
 ```
 ### Authors
 - Rinaldo W. Montalvão, PhD
+- Antonio Marinho da Silva Neto, PhD
 - William R. Pitt, PhD
 
 ### References
