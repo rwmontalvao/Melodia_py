@@ -6,47 +6,31 @@ and Knot Theory descriptors of protein structures.
 
 ## Installation [Anaconda Python](https://www.anaconda.com/products/individual)
 
-We recommend using [Mamba](https://github.com/mamba-org/mamba) for installation.
+The first step is to clone Melodia's repository.
+```shell
+git clone --recursive https://github.com/rwmontalvao/Melodia.git
+cd ./Melodia
+```
+We recommend using [Mamba](https://github.com/mamba-org/mamba) for installation (optional).
 
 ```shell
 conda install mamba -n base -c conda-forge
 ```
-It is recommended the creation of a new environment for **Melodia**.
+We start with creation of a new environment for **Melodia**.
 
 ```shell
-conda create --name melodia python=3.9
+conda create -f environment.yml
 ```
+or (optionally, but highly recommended)
+
+```shell
+mamba create -f environment.yml
+```
+Next step is to activate the Melodia environment
+
 ```shell
 conda activate melodia
 ```
-
-**Melodia** requires [Jupyterlab](https://jupyter.org/), [NGL Viewer](https://github.com/nglviewer/nglview), [scikit-learn](https://scikit-learn.org/stable) and [seaborn](https://seaborn.pydata.org/).
-
-```shell
-mamba install jupyterlab
-```
-
-```shell
-mamba install -c conda-forge nglview
-```
-
-```shell
-mamba install -c conda-forge scikit-learn
-```
-
-```shell
-mamba install -c conda-forge seaborn
-```
-
-The examples need [dill](https://github.com/uqfoundation/dill) and [pyarrow](https://github.com/apache/arrow).
-
-```shell
-mamba install -c anaconda dill
-```
-```shell
-mamba install -c conda-forge pyarrow
-```
-
 To build and install **Melodia**:
 
 ```shell
