@@ -19,12 +19,12 @@ conda install mamba -n base -c conda-forge
 We start with creation of a new environment for **Melodia**.
 
 ```shell
-conda create -f environment.yml
+conda env create -f environment.yml
 ```
 or (optionally, but highly recommended)
 
 ```shell
-mamba create -f environment.yml
+mamba env create -f environment.yml
 ```
 Next step is to activate the Melodia environment
 
