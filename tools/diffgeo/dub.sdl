@@ -1,7 +1,0 @@
-name "diffgeo"
-description "Differential Geometry of Proteins"
-authors "Rinaldo Wander Montalvao"
-copyright "Copyright © 2022, Rinaldo Wander Montalvao"
-license "proprietary"
-
-dependency "progress" version="~>5.0.2"
