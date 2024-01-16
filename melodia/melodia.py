@@ -185,6 +185,8 @@ def bfactor_from_geo(structure: Structure, attribute: str, geo: Dict[str, Geomet
                         value = geo[key].residues[res].curvature
                     elif attribute == 'torsion':
                         value = geo[key].residues[res].torsion
+                    elif attribute == 'custom':
+                        value = geo[key].residues[res].custom
                     else:
                         value = 0.0
 
@@ -703,7 +705,7 @@ def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str, palett
     with open(out_file, 'w') as ps:
         ps.write('%%!PS-Adobe-3.0\n')
         ps.write('%%%%Pages: 1\n')
-        ps.write('%%%%Creator: Choral 1.0\n')
+        ps.write('%%%%Creator: Melodia 1.0\n')
         ps.write('%%%%CreationDate:\n')
         ps.write('%%%%EndComments\n')
         ps.write('%%%%Page: 1 1\n')

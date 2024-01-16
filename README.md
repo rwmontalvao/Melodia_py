@@ -1,3 +1,4 @@
+![Melodia](Melodia_logo.png)
 # Melodia
 ## Protein Structure Analysis
 
@@ -8,7 +9,7 @@ and Knot Theory descriptors of protein structures.
 
 The first step is to clone Melodia's repository.
 ```shell
-git clone --recursive https://github.com/rwmontalvao/Melodia.git
+git clone https://github.com/rwmontalvao/Melodia.git
 cd ./Melodia
 ```
 We recommend using [Mamba](https://github.com/mamba-org/mamba) for installation (optional).
@@ -36,6 +37,10 @@ To build and install **Melodia**:
 ```shell
 python setup.py install
 ```
+
+## Documentation
+The *examples* folder contains Jupyter Notebooks, with short tutorials explaining **Melodia's** functionalities. 
+
 ### Authors
 - Rinaldo W. Montalvão, PhD
 - Antonio Marinho da Silva Neto, PhD

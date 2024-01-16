@@ -47,6 +47,9 @@ class ResidueGeometry:
     # Residue annotation
     res_ann: Dict[str, str] = None
 
+    # Custom float value
+    custom: float = None
+
 
 class GeometryParser:
     """
@@ -435,7 +438,8 @@ class GeometryParser:
                                                  torsion=0.0,
                                                  arc_len=0.0,
                                                  writhing=0.0,
-                                                 res_ann={})
+                                                 res_ann={},
+                                                 custom=0.0)
             residues_map[pos] = num
 
             num += 1
