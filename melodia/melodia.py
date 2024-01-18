@@ -173,8 +173,29 @@ def bfactor_from_geo(structure: Structure, attribute: str, geo: Dict[str, Geomet
     if geo is None:
         geo = geometry_dict_from_structure(structure)
 
-    for model in structure.get_list():
-        for chain in model.get_list():
+    # Set all atoms' bfactors to a minimal values
+    min_values = []
+    for key in geo:
+        if attribute == 'curvature':
+            min_values.append(min([res.curvature for res in geo[key].residues.values()]))
+        elif attribute == 'torsion':
+            min_values.append(min([res.torsion for res in geo[key].residues.values()]))
+        elif attribute == 'custom':
+            min_values.append(min([res.custom for res in geo[key].residues.values()]))
+        else:
+            min_values.append(0.0)
+
+    min_value = min(min_values)
+    for atom in structure.get_atoms():
+        if atom.is_disordered():
+            for disordered_atom in atom.disordered_get_list():
+                disordered_atom.set_bfactor(min_value)
+        else:
+            atom.set_bfactor(min_value)
+
+    # Change bfactors to a differential geometry value
+    for model in structure:
+        for chain in model:
             for atom in chain.get_atoms():
                 het_flag, sequence_id, insertion_code = atom.get_parent().id
                 if het_flag[0] == " ":
