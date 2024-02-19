@@ -2,23 +2,29 @@ name: melodia
 channels:
   - anaconda
   - conda-forge
-  - defaults
 dependencies:
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=2_gnu
-  - abseil-cpp=20211102.0=h93e1e8c_2
+  - abseil-cpp=20220623.0=h8cdb687_6
   - anyio=3.5.0=py39h06a4308_0
   - argon2-cffi=21.3.0=pyhd3eb1b0_0
   - argon2-cffi-bindings=21.2.0=py39h7f8727e_0
-  - arrow-cpp=9.0.0=py39h2531139_1_cpu
+  - arrow-cpp=11.0.0=ha770c72_5_cpu
   - asttokens=2.0.5=pyhd3eb1b0_0
   - attrs=21.4.0=pyhd3eb1b0_0
-  - aws-c-cal=0.5.11=h95a6274_0
-  - aws-c-common=0.6.2=h7f98852_0
-  - aws-c-event-stream=0.2.7=h3541f99_13
-  - aws-c-io=0.10.5=hfb6a706_0
-  - aws-checksums=0.1.11=ha31a3da_7
-  - aws-sdk-cpp=1.8.186=hb4091e7_3
+  - aws-c-auth=0.6.24=h84a1944_5
+  - aws-c-cal=0.5.20=hc60faf5_6
+  - aws-c-common=0.8.11=h0b41bf4_0
+  - aws-c-compression=0.2.16=h034cb4b_3
+  - aws-c-event-stream=0.2.18=h75388cd_6
+  - aws-c-http=0.7.4=hf084cc8_2
+  - aws-c-io=0.13.17=h10df833_2
+  - aws-c-mqtt=0.8.6=hc41645a_6
+  - aws-c-s3=0.2.4=h1b8f470_3
+  - aws-c-sdkutils=0.1.7=h034cb4b_3
+  - aws-checksums=0.1.14=h034cb4b_3
+  - aws-crt-cpp=0.19.7=h0073717_7
+  - aws-sdk-cpp=1.10.57=h4707e7a_4
   - babel=2.9.1=pyhd3eb1b0_0
   - backcall=0.2.0=pyhd3eb1b0_0
   - beautifulsoup4=4.11.1=py39h06a4308_0
@@ -29,11 +35,11 @@ dependencies:
   - brotlipy=0.7.0=py39h27cfd23_1003
   - bzip2=1.0.8=h7f98852_4
   - c-ares=1.18.1=h7f98852_0
-  - ca-certificates=2022.07.19=h06a4308_0
-  - certifi=2022.6.15=py39h06a4308_0
+  - ca-certificates=2023.11.17=hbcca054_0
+  - certifi=2023.11.17=pyhd8ed1ab_0
   - cffi=1.15.1=py39h74dc2b5_0
   - charset-normalizer=2.0.4=pyhd3eb1b0_0
-  - cryptography=37.0.1=py39h9ce1e76_0
+  - cryptography=41.0.7=py39he6105cc_1
   - cycler=0.11.0=pyhd8ed1ab_0
   - debugpy=1.5.1=py39h295c915_0
   - decorator=5.1.1=pyhd3eb1b0_0
@@ -45,7 +51,7 @@ dependencies:
   - freetype=2.12.1=hca18f0e_0
   - gflags=2.2.2=he1b5a44_1004
   - glog=0.6.0=h6f12383_0
-  - grpc-cpp=1.46.4=h6fc47f4_3
+  - grpc-cpp=1.51.1=h27aab58_1
   - idna=3.3=pyhd3eb1b0_0
   - ipykernel=6.9.1=py39h06a4308_0
   - ipython=8.4.0=py39h06a4308_0
@@ -66,49 +72,53 @@ dependencies:
   - jupyterlab_widgets=1.1.1=pyhd8ed1ab_0
   - keyutils=1.6.1=h166bdaf_0
   - kiwisolver=1.4.4=py39hf939315_0
-  - krb5=1.19.3=h3790be6_0
+  - krb5=1.21.2=h659d440_0
   - lcms2=2.12=hddcbb42_0
   - ld_impl_linux-64=2.38=h1181459_1
   - lerc=4.0.0=h27087fc_0
-  - libabseil=20211102.0=cxx17_h48a1fff_2
+  - libabseil=20220623.0=cxx17_h05df665_6
+  - libarrow=11.0.0=h2ebd325_5_cpu
   - libblas=3.9.0=16_linux64_openblas
   - libbrotlicommon=1.0.9=h166bdaf_7
   - libbrotlidec=1.0.9=h166bdaf_7
   - libbrotlienc=1.0.9=h166bdaf_7
   - libcblas=3.9.0=16_linux64_openblas
   - libcrc32c=1.1.2=h9c3ff4c_0
-  - libcurl=7.84.0=h91b91d3_0
+  - libcurl=8.2.1=hca28451_0
   - libdeflate=1.13=h166bdaf_0
   - libedit=3.1.20210910=h7f8727e_0
   - libev=4.33=h516909a_1
-  - libevent=2.1.10=h9b69904_4
+  - libevent=2.1.10=h28343ad_4
   - libffi=3.4.2=h7f98852_5
   - libgcc-ng=12.1.0=h8d9b700_16
   - libgfortran-ng=12.1.0=h69a702a_16
   - libgfortran5=12.1.0=hdcd56e2_16
   - libgomp=12.1.0=h8d9b700_16
-  - libgoogle-cloud=1.40.2=hefc27d0_0
+  - libgoogle-cloud=2.7.0=h21dfe5b_1
+  - libgrpc=1.51.1=h4fad500_1
   - liblapack=3.9.0=16_linux64_openblas
-  - libnghttp2=1.47.0=hdcd2b5c_1
+  - libnghttp2=1.52.0=h61bc06f_0
   - libnsl=2.0.0=h7f98852_0
   - libopenblas=0.3.21=pthreads_h78a6416_2
   - libpng=1.6.37=h753d276_4
-  - libprotobuf=3.20.1=h6239696_1
+  - libprotobuf=3.21.12=hfc55251_2
   - libsodium=1.0.18=h7b6447c_0
-  - libssh2=1.10.0=haa6b8db_3
+  - libsqlite=3.44.2=h2797004_0
+  - libssh2=1.11.0=h0841786_0
   - libstdcxx-ng=12.1.0=ha89aaad_16
-  - libthrift=0.16.0=h519c5ea_1
+  - libthrift=0.18.0=h5e4af38_0
   - libtiff=4.4.0=h0e0dad5_3
-  - libutf8proc=2.7.0=h7f98852_0
+  - libutf8proc=2.8.0=h166bdaf_0
   - libuuid=2.32.1=h7f98852_1000
   - libwebp-base=1.2.4=h166bdaf_0
   - libxcb=1.13=h7f98852_1004
-  - libzlib=1.2.12=h166bdaf_2
+  - libzlib=1.2.13=hd590300_5
   - lz4-c=1.9.3=h9c3ff4c_1
   - markupsafe=2.1.1=py39h7f8727e_0
   - matplotlib-base=3.5.3=py39h700656a_1
   - matplotlib-inline=0.1.2=pyhd3eb1b0_2
   - mistune=0.8.4=py39h27cfd23_1000
+  - more-itertools=10.1.0=pyhd8ed1ab_0
   - munkres=1.1.4=pyh9f0ad1d_0
   - nbclassic=0.3.5=pyhd3eb1b0_0
   - nbclient=0.5.13=py39h06a4308_0
@@ -121,8 +131,8 @@ dependencies:
   - numpy=1.23.1=py39hf838250_0
   - numpy-base=1.23.1=py39h1e6e340_0
   - openjpeg=2.5.0=h7d73246_1
-  - openssl=1.1.1q=h166bdaf_0
-  - orc=1.7.5=h6c59b99_0
+  - openssl=3.2.0=hd590300_1
+  - orc=1.8.2=hfdbbad2_2
   - packaging=21.3=pyhd3eb1b0_0
   - pandas=1.4.3=py39h1832856_0
   - pandocfilters=1.5.0=pyhd3eb1b0_0
@@ -138,23 +148,23 @@ dependencies:
   - pthread-stubs=0.4=h36c2ea0_1001
   - ptyprocess=0.7.0=pyhd3eb1b0_2
   - pure_eval=0.2.2=pyhd3eb1b0_0
-  - pyarrow=9.0.0=py39h58137f1_1_cpu
+  - pyarrow=11.0.0=py39hf0ef2fd_5_cpu
   - pycparser=2.21=pyhd3eb1b0_0
   - pygments=2.11.2=pyhd3eb1b0_0
-  - pyopenssl=22.0.0=pyhd3eb1b0_0
+  - pyopenssl=23.3.0=pyhd8ed1ab_0
   - pyparsing=3.0.4=pyhd3eb1b0_0
   - pyrsistent=0.18.0=py39heee7806_0
   - pysocks=1.7.1=py39h06a4308_0
-  - python=3.9.13=h9a8a25e_0_cpython
+  - python=3.9.16=h2782a2a_0_cpython
   - python-dateutil=2.8.2=pyhd3eb1b0_0
   - python-fastjsonschema=2.15.1=pyhd3eb1b0_0
   - python_abi=3.9=2_cp39
   - pytz=2022.1=py39h06a4308_0
   - pyzmq=23.2.0=py39h6a678d5_0
-  - re2=2022.06.01=h27087fc_0
+  - re2=2023.02.01=hcb278e6_0
   - readline=8.1.2=h7f8727e_1
   - requests=2.28.1=py39h06a4308_0
-  - s2n=1.0.10=h9b69904_0
+  - s2n=1.3.37=h3358134_0
   - scikit-learn=1.1.2=py39he5e8d7e_0
   - scipy=1.9.0=py39h8ba3f38_0
   - seaborn=0.11.2=hd8ed1ab_0
@@ -186,10 +196,10 @@ dependencies:
   - widgetsnbextension=3.6.1=pyha770c72_0
   - xorg-libxau=1.0.9=h7f98852_0
   - xorg-libxdmcp=1.1.3=h7f98852_0
-  - xz=5.2.5=h7f8727e_1
+  - xz=5.2.6=h166bdaf_0
   - zeromq=4.3.4=h2531618_0
-  - zlib=1.2.12=h7f8727e_2
+  - zlib=1.2.13=hd590300_5
   - zstd=1.5.2=h6239696_4
   - pip:
-    - biopython==1.79
-prefix: /home/rinaldo/anaconda3/envs/melodia
+      - biopython==1.79
+prefix: /home/rinaldo/miniforge3/envs/melodia

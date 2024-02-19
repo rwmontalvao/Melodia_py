@@ -12,11 +12,10 @@ The first step is to clone Melodia's repository.
 git clone https://github.com/rwmontalvao/Melodia.git
 cd ./Melodia
 ```
-We recommend using [Mamba](https://github.com/mamba-org/mamba) for installation (optional).
+We recommend using [Miniforge](https://github.com/conda-forge/miniforge) and Mamba for installation (optional). 
+Miniforge is an Anaconda Python-compatible distribution with a faster and more reliable package manager (Mamba).
+It is as simple to install as the Anaconda distribution. 
 
-```shell
-conda install mamba -n base -c conda-forge
-```
 We start with creation of a new environment for **Melodia**.
 
 ```shell
