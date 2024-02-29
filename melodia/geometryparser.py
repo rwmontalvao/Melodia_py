@@ -17,9 +17,10 @@
 import math
 import numpy as np
 
-from typing import Dict, List, Tuple
 from Bio.PDB import Chain
-from dataclasses import dataclass
+from typing import Dict, List, Tuple
+from collections import defaultdict
+from dataclasses import dataclass, field
 from numpy.polynomial import chebyshev
 from scipy.interpolate import CubicSpline
 
@@ -27,28 +28,28 @@ from scipy.interpolate import CubicSpline
 @dataclass
 class ResidueGeometry:
     # Residue information
-    name: str = None
-    chain: str = None
-    res_num: str = None
-    res_order: int = None
+    name: str = ""
+    chain: str = ""
+    res_num: int = 0
+    res_order: int = 0
 
     # Differential geometry
-    curvature: float = None
-    torsion: float = None
-    arc_len: float = None
+    curvature: float = 0.0
+    torsion: float = 0.0
+    arc_len: float = 0.0
 
     # Knot theory invariant
-    writhing: float = None
+    writhing: float = 0.0
 
     # Dihedral angles
-    phi: float = None
-    psi: float = None
+    phi: float = 0.0
+    psi: float = 0.0
 
     # Residue annotation
-    res_ann: Dict[str, str] = None
+    res_ann: Dict[str, str] = field(default_factory=lambda: defaultdict(dict))
 
     # Custom float value
-    custom: float = None
+    custom: float = 0.0
 
 
 class GeometryParser:
@@ -200,11 +201,14 @@ class GeometryParser:
         :return: curvature, torsion
         :rtype: (float, float)
         """
-        numpts = 51
+        number_points = 51
 
         # TODO: Improve balance method
         mn = np.min(t)
         mx = np.max(t)
+        cxt, result_xt = 0.0, 0.0
+        cyt, result_yt = 0.0, 0.0
+        czt, result_zt = 0.0, 0.0
         for dt in range(1, 4):
             delta = float(dt)
 
@@ -221,42 +225,42 @@ class GeometryParser:
             ini += offset
             end += offset
 
-            tp = np.linspace(ini, end, numpts)
+            tp = np.linspace(ini, end, number_points)
 
-            cxt, resxt = chebyshev.chebfit(tp, xt(tp), deg=10, full=True)
-            cyt, resyt = chebyshev.chebfit(tp, yt(tp), deg=10, full=True)
-            czt, reszt = chebyshev.chebfit(tp, zt(tp), deg=10, full=True)
+            cxt, result_xt = chebyshev.chebfit(tp, xt(tp), deg=10, full=True)
+            cyt, result_yt = chebyshev.chebfit(tp, yt(tp), deg=10, full=True)
+            czt, result_zt = chebyshev.chebfit(tp, zt(tp), deg=10, full=True)
 
-            if resxt[0].size != 0 and resyt[0].size != 0 and reszt[0].size != 0:
+            if result_xt[0].size != 0 and result_yt[0].size != 0 and result_zt[0].size != 0:
                 break
 
-        cxtd1 = chebyshev.chebder(cxt, m=1)
-        cytd1 = chebyshev.chebder(cyt, m=1)
-        cztd1 = chebyshev.chebder(czt, m=1)
+        cxt_d1 = chebyshev.chebder(cxt, m=1)
+        cyt_d1 = chebyshev.chebder(cyt, m=1)
+        czt_d1 = chebyshev.chebder(czt, m=1)
 
-        cxtd2 = chebyshev.chebder(cxt, m=2)
-        cytd2 = chebyshev.chebder(cyt, m=2)
-        cztd2 = chebyshev.chebder(czt, m=2)
+        cxt_d2 = chebyshev.chebder(cxt, m=2)
+        cyt_d2 = chebyshev.chebder(cyt, m=2)
+        czt_d2 = chebyshev.chebder(czt, m=2)
 
-        cxtd3 = chebyshev.chebder(cxt, m=3)
-        cytd3 = chebyshev.chebder(cyt, m=3)
-        cztd3 = chebyshev.chebder(czt, m=3)
+        cxt_d3 = chebyshev.chebder(cxt, m=3)
+        cyt_d3 = chebyshev.chebder(cyt, m=3)
+        czt_d3 = chebyshev.chebder(czt, m=3)
 
-        xtd1 = chebyshev.chebval(p, cxtd1)
-        ytd1 = chebyshev.chebval(p, cytd1)
-        ztd1 = chebyshev.chebval(p, cztd1)
+        xt_d1 = chebyshev.chebval(p, cxt_d1)
+        yt_d1 = chebyshev.chebval(p, cyt_d1)
+        zt_d1 = chebyshev.chebval(p, czt_d1)
 
-        xtd2 = chebyshev.chebval(p, cxtd2)
-        ytd2 = chebyshev.chebval(p, cytd2)
-        ztd2 = chebyshev.chebval(p, cztd2)
+        xt_d2 = chebyshev.chebval(p, cxt_d2)
+        yt_d2 = chebyshev.chebval(p, cyt_d2)
+        zt_d2 = chebyshev.chebval(p, czt_d2)
 
-        xtd3 = chebyshev.chebval(p, cxtd3)
-        ytd3 = chebyshev.chebval(p, cytd3)
-        ztd3 = chebyshev.chebval(p, cztd3)
+        xt_d3 = chebyshev.chebval(p, cxt_d3)
+        yt_d3 = chebyshev.chebval(p, cyt_d3)
+        zt_d3 = chebyshev.chebval(p, czt_d3)
 
         # Compute curvature
-        v1 = np.array([xtd1, ytd1, ztd1])
-        v2 = np.array([xtd2, ytd2, ztd2])
+        v1 = np.array([xt_d1, yt_d1, zt_d1])
+        v2 = np.array([xt_d2, yt_d2, zt_d2])
 
         rs = np.cross(v1, v2)
         r1 = np.dot(rs, rs)
@@ -265,12 +269,12 @@ class GeometryParser:
         curvature = math.sqrt(r1) / math.sqrt(r2) ** 3
 
         # Compute torsion
-        det = -xtd3 * ytd2 * ztd1
-        det += xtd2 * ytd3 * ztd1
-        det += xtd3 * ytd1 * ztd2
-        det -= xtd1 * ytd3 * ztd2
-        det -= xtd2 * ytd1 * ztd3
-        det += xtd1 * ytd2 * ztd3
+        det = -xt_d3 * yt_d2 * zt_d1
+        det += xt_d2 * yt_d3 * zt_d1
+        det += xt_d3 * yt_d1 * zt_d2
+        det -= xt_d1 * yt_d3 * zt_d2
+        det -= xt_d2 * yt_d1 * zt_d3
+        det += xt_d1 * yt_d2 * zt_d3
 
         torsion = det / r1
 
@@ -430,7 +434,7 @@ class GeometryParser:
             y.append(coord[1])
             z.append(coord[2])
 
-            residues[int(num)] = ResidueGeometry(name=residue.get_resname(),
+            residues[num] = ResidueGeometry(name=residue.get_resname(),
                                                  chain=chain_id,
                                                  res_num=num,
                                                  res_order=pos,
