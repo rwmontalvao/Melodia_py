@@ -540,17 +540,22 @@ def cluster_alignment(align: Bio.Align.MultipleSeqAlignment, threshold=0.7, long
                 xy.append([record.letter_annotations['curvature'][i], record.letter_annotations['torsion'][i]])
                 tags.append(identity)
 
-        xy = scaler.transform(xy)
+        if len(xy) > 1:
+            xy = scaler.transform(xy)
 
-        clusters = clustering.fit_predict(xy)
+            clusters = clustering.fit_predict(xy)
 
-        map_of_clusters = {pair[0]: pair[1] for pair in zip(tags, clusters)}
+            map_of_clusters = {pair[0]: pair[1] for pair in zip(tags, clusters)}
 
-        for identity, position in id2pos.items():
-            record = align[position]
-            if identity in map_of_clusters:
-                record.letter_annotations['cluster'][i] = map_of_clusters[identity]
-                # print(id, record.letter_annotations['cluster'][i])
+            for identity, position in id2pos.items():
+                record = align[position]
+                if identity in map_of_clusters:
+                    record.letter_annotations['cluster'][i] = map_of_clusters[identity]
+                    # print(id, record.letter_annotations['cluster'][i])
+        else:
+            for identity, position in id2pos.items():
+                record = align[position]
+                record.letter_annotations['cluster'][i] = 0
 
     last_cluster = 0
     for record in align:
@@ -676,6 +681,7 @@ def save_pymol_script(align: Bio.Align.MultipleSeqAlignment, pml_file: str, pale
                         colour = f'0x{pal[cluster % colors][1:]}'
                         f.write(f'color {colour}, {record.id} and resi {ini + 1}-{end + 1}\n')
                 f.write('\n')
+        f.write('\ncenter\n')
     return
 
 
