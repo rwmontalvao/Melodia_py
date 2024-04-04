@@ -1,4 +1,4 @@
-# Copyright 2021 KU Leuven.
+# Copyright 2021-2024 KU Leuven.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,13 +14,10 @@
 #
 # Author: Rinaldo Wander Montalvão, PhD
 #
-# TODO: Better error messages
-#
 import os
 from typing_extensions import SupportsIndex
 
 import Bio.Align
-import pkg_resources
 
 import pandas as pd
 import nglview as nv

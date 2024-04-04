@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="melodia",
-    version="0.1.0",
+    version="0.1.2",
     url="https://github.com/rwmontalvao/Melodia",
     author="Rinaldo Wander Montalvão, PhD",
     author_email="rwmontalvao@gmail.com",
@@ -13,7 +13,7 @@ setuptools.setup(
     classifiers=[
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.12',
     ],
     include_package_data=True,
     package_data={'': ['data/*.dat']},
