@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="melodia_py",
-    version="0.1.3",
+    version="0.1.4",
     url="https://github.com/rwmontalvao/Melodia_py",
     author="Rinaldo Wander Montalvão, PhD",
     author_email="rwmontalvao@gmail.com",
@@ -20,7 +20,8 @@ setuptools.setup(
                       'nglview>=3.1.2',
                       'pyarrow>=16.1.0',
                       'scikit-learn>=1.5.0',
-                      'sty>=1.0.0'],
+                      'sty>=1.0.0',
+                      'more-itertools>=10.3.0'],
     classifiers=[
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
