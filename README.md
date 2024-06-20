@@ -5,13 +5,12 @@
 **Melodia_py** is a Python library for computing Differential Geometry
 and Knot Theory descriptors of protein structures. 
 
-## Installation from source in [Anaconda Python](https://www.anaconda.com/products/individual)
+## Installation
+1. Open the terminal.
+2. Run `pip install melodia-py` for the installation.
 
-The first step is to clone Melodia_py's repository.
-```shell
-git clone https://github.com/rwmontalvao/Melodia.git
-cd ./Melodia_py
-```
+## Installation in [Anaconda Python](https://www.anaconda.com/products/individual)
+
 We recommend using [Miniforge](https://github.com/conda-forge/miniforge) and Mamba for installation (optional). 
 Miniforge is an Anaconda Python-compatible distribution with a faster and more reliable package manager (Mamba).
 It is as simple to install as the Anaconda distribution. 
@@ -30,8 +29,13 @@ Next step is to activate the Melodia_py environment
 
 ```shell
 conda activate melodia_py
+pip install melodia-py
 ```
-To build and install **Melodia_py**:
+Or for building and installing **Melodia_py** for source. The first step is to clone Melodia_py's repository.
+```shell
+git clone https://github.com/rwmontalvao/Melodia.git
+cd ./Melodia_py
+```
 
 ```shell
 python setup.py install
@@ -39,12 +43,18 @@ python setup.py install
 
 ## Documentation
 The *examples* folder contains Jupyter Notebooks, with short tutorials explaining **Melodia_py's** functionalities. 
-1. Getting Started
-2. Alignment Basics
-3. Basic Similarity Analysis
-4. Advanced Similarity Analysis
-5. Machine Leaning Ensemble Analysis
-6. Alignment Clustering and PDB Superimposition
+* Getting Started: 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/01_getting_started.ipynb)
+* Alignment Basics:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/02_alignment_basics.ipynb)
+* Basic Similarity Analysis:
+ [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/03_basic_similarity_analysis.ipynb)
+* Advanced Similarity Analysis:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/04_advanced_similarity_analysis.ipynb)
+* Machine Leaning Ensemble Analysis:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/05_Machine_Learning_ensemble_analysis.ipynb)
+* Alignment Clustering and PDB Superimposition:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/06_alignment_clustering_and_superimposition.ipynb)
 
 ### Authors
 - Rinaldo W. Montalvão, PhD
