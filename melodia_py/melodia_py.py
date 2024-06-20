@@ -30,7 +30,7 @@ from Bio import AlignIO
 from Bio.PDB import PDBParser
 from Bio.PDB.Structure import Structure
 
-from melodia.geometryparser import GeometryParser
+from melodia_py.geometryparser import GeometryParser
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering

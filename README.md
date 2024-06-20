@@ -1,8 +1,8 @@
 ![Melodia](Melodia_logo.png)
-# Melodia
+# Melodia_py
 ## Protein Structure Analysis
 
-**Melodia** is a Python library for computing Differential Geometry
+**Melodia_py** is a Python library for computing Differential Geometry
 and Knot Theory descriptors of protein structures. 
 
 ## Installation [Anaconda Python](https://www.anaconda.com/products/individual)
@@ -10,7 +10,7 @@ and Knot Theory descriptors of protein structures.
 The first step is to clone Melodia's repository.
 ```shell
 git clone https://github.com/rwmontalvao/Melodia.git
-cd ./Melodia
+cd ./Melodia_py
 ```
 We recommend using [Miniforge](https://github.com/conda-forge/miniforge) and Mamba for installation (optional). 
 Miniforge is an Anaconda Python-compatible distribution with a faster and more reliable package manager (Mamba).
@@ -29,7 +29,7 @@ mamba env create -f environment.yml
 Next step is to activate the Melodia environment
 
 ```shell
-conda activate melodia
+conda activate melodia_py
 ```
 To build and install **Melodia**:
 

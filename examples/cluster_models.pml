@@ -155,3 +155,5 @@ color 0xa6761d, 1teha and resi 353-370
 color 0xa6761d, 2ohxa and resi 353-370
 color 0xa6761d, 3huda and resi 353-370
 
+
+center

@@ -14,7 +14,7 @@
 #
 # Author: Rinaldo Wander Montalvão, PhD
 #
-import melodia as mel
+import melodia_py as mel
 
 if __name__ == '__main__':
     print(mel.geometry_from_structure_file(file_name="2k5x.pdb"))

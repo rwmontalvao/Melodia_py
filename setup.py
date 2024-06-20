@@ -1,9 +1,9 @@
 import setuptools
 
 setuptools.setup(
-    name="melodia",
+    name="melodia_py",
     version="0.1.2",
-    url="https://github.com/rwmontalvao/Melodia",
+    url="https://github.com/rwmontalvao/Melodia_py",
     author="Rinaldo Wander Montalvão, PhD",
     author_email="rwmontalvao@gmail.com",
     description="Differential Geometry of Proteins Backbones",
