@@ -35,6 +35,7 @@ from melodia_py.geometryparser import GeometryParser
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering
 
+from importlib import resources as importlib_resources
 
 def geometry_from_structure_file(file_name: str) -> pd.DataFrame:
     """
@@ -443,8 +444,9 @@ class PropensityTable:
             rows.append(self.__lines[self.__ini])
             return int(tag[1]), rows
 
-        stream = pkg_resources.resource_stream(__name__, 'data/luthier.dat')
-        lines = stream.readlines()
+        ref = importlib_resources.files(__name__).joinpath('data/luthier.dat')
+        with ref.open('rb') as fp:
+            lines = fp.readlines()
 
         # Remove newlines
         for i, line in enumerate(lines):

@@ -5,9 +5,9 @@
 **Melodia_py** is a Python library for computing Differential Geometry
 and Knot Theory descriptors of protein structures. 
 
-## Installation [Anaconda Python](https://www.anaconda.com/products/individual)
+## Installation from source in [Anaconda Python](https://www.anaconda.com/products/individual)
 
-The first step is to clone Melodia's repository.
+The first step is to clone Melodia_py's repository.
 ```shell
 git clone https://github.com/rwmontalvao/Melodia.git
 cd ./Melodia_py
@@ -16,7 +16,7 @@ We recommend using [Miniforge](https://github.com/conda-forge/miniforge) and Mam
 Miniforge is an Anaconda Python-compatible distribution with a faster and more reliable package manager (Mamba).
 It is as simple to install as the Anaconda distribution. 
 
-We start with creation of a new environment for **Melodia**.
+We start with creation of a new environment for **Melodia_py**.
 
 ```shell
 conda env create -f environment.yml
@@ -26,19 +26,19 @@ or (optionally, but highly recommended)
 ```shell
 mamba env create -f environment.yml
 ```
-Next step is to activate the Melodia environment
+Next step is to activate the Melodia_py environment
 
 ```shell
 conda activate melodia_py
 ```
-To build and install **Melodia**:
+To build and install **Melodia_py**:
 
 ```shell
 python setup.py install
 ```
 
 ## Documentation
-The *examples* folder contains Jupyter Notebooks, with short tutorials explaining **Melodia's** functionalities. 
+The *examples* folder contains Jupyter Notebooks, with short tutorials explaining **Melodia_py's** functionalities. 
 1. Getting Started
 2. Alignment Basics
 3. Basic Similarity Analysis
