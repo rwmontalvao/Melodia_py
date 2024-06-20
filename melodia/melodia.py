@@ -234,8 +234,8 @@ def view_putty(structure: Structure, radius_scale=1.0, width=1200, height=600) -
              "colorScale": "RdYlBu"
          }}
     ]
-    view.layout.width = 'auto'
-    view.layout.height = 'auto'
+    view.layout.width = '100%'
+    view.layout.height = '100%'
 
     box = Box([view])
     box.layout.width = f'{width}px'
@@ -263,8 +263,8 @@ def view_cartoon(structure: Structure, width=1200, height=600) -> Box:
              "colorScale": "RdYlBu"
          }}
     ]
-    view.layout.width = 'auto'
-    view.layout.height = 'auto'
+    view.layout.width = '100%'
+    view.layout.height = '100%'
 
     box = Box([view])
     box.layout.width = f'{width}px'
@@ -292,8 +292,8 @@ def view_tube(structure: Structure, width=1200, height=600) -> Box:
              "colorScale": "RdYlBu"
          }}
     ]
-    view.layout.width = 'auto'
-    view.layout.height = 'auto'
+    view.layout.width = '100%'
+    view.layout.height = '100%'
 
     box = Box([view])
     box.layout.width = f'{width}px'
@@ -675,8 +675,8 @@ def save_pymol_script(align: Bio.Align.MultipleSeqAlignment, pml_file: str, pale
                     if 'structure' not in record.description:
                         continue
                     if record.letter_annotations['cluster'][ini] == cluster:
-                        colour = f'0x{pal[cluster % colors][1:]}'
-                        f.write(f'color {colour}, {record.id} and resi {ini + 1}-{end + 1}\n')
+                        color = f'0x{pal[cluster % colors][1:]}'
+                        f.write(f'color {color}, {record.id} and resi {ini + 1}-{end + 1}\n')
                 f.write('\n')
         f.write('\ncenter\n')
     return

@@ -39,6 +39,12 @@ python setup.py install
 
 ## Documentation
 The *examples* folder contains Jupyter Notebooks, with short tutorials explaining **Melodia's** functionalities. 
+1. Getting Started
+2. Alignment Basics
+3. Basic Similarity Analysis
+4. Advanced Similarity Analysis
+5. Machine Leaning Ensemble Analysis
+6. Alignment Clustering and PDB Superimposition
 
 ### Authors
 - Rinaldo W. Montalvão, PhD
