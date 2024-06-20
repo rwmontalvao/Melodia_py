@@ -444,7 +444,7 @@ class PropensityTable:
             rows.append(self.__lines[self.__ini])
             return int(tag[1]), rows
 
-        ref = importlib_resources.files(__name__).joinpath('data/luthier.dat')
+        ref = importlib_resources.files('melodia_py').joinpath('data/luthier.dat')
         with ref.open('rb') as fp:
             lines = fp.readlines()
 
