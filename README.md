@@ -42,7 +42,7 @@ python setup.py install
 ```
 
 ## Documentation
-The *examples* folder contains Jupyter Notebooks, with short tutorials explaining **Melodia_py's** functionalities. 
+The *examples* folder contains Jupyter Notebooks, with tutorials explaining **Melodia_py's** functionalities. 
 * Getting Started: 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/01_getting_started.ipynb)
 * Alignment Basics:
