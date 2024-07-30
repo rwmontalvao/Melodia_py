@@ -18,7 +18,7 @@ import math
 import numpy as np
 
 from Bio.PDB import Chain
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 from collections import defaultdict
 from dataclasses import dataclass, field
 from numpy.polynomial import chebyshev
@@ -396,7 +396,7 @@ class GeometryParser:
         return writhing
 
     @staticmethod
-    def calc_geometry(chain: Chain, deg: bool) -> Dict[int, ResidueGeometry]:
+    def calc_geometry(chain: Chain, deg: bool) -> tuple[dict[int, ResidueGeometry], dict[Any, int]]:
         """
         Function used to compute the geometric properties around residues.
         It computes curvature, torsion, arc-length and writhing number
@@ -407,6 +407,21 @@ class GeometryParser:
         :return:  Residue dictionary
         :rtype: Dict[int, ResidueGeometry]
         """
+
+        # test for a RNA chain
+        residue = list(chain.get_residues())[0]
+
+        rna = False
+        last = None
+        atom = 'CA'
+        if residue.get_resname() in 'GUAC':
+            rna = True
+            atom = "C5'"
+            # Find the last residue
+            for residue in chain:
+                if residue.id[0] == ' ':
+                    last = residue.id[1]
+
         t = []
         x = []
         y = []
@@ -420,14 +435,16 @@ class GeometryParser:
             # Skip invalid residues
             res_type, model, chain_id, res_id = residue.get_full_id()
             het_flag, pos, insertion_code = res_id
-            if het_flag[0] != " ":
+            if het_flag[0] != ' ':
                 continue
 
-            try:
-                coord = residue["CA"].get_coord()
-            except KeyError:
-                print(f'ERROR: missing CA atom at {residue.get_resname()} - {residue.get_full_id()}!')
-                raise
+            if atom in residue:
+                coord = residue[atom].get_coord()
+            elif rna and residue.id[1] == last:
+                # TODO: better chain validation for RNA
+                coord = list(residue.get_atoms())[0].get_coord()
+            else:
+                raise Exception(f'ERROR: missing {atom} atom at {residue.get_resname()} - {residue.get_full_id()}!')
 
             t.append(float(num))
             x.append(coord[0])
@@ -466,16 +483,19 @@ class GeometryParser:
 
             # Compute the arc length
             arc_len = GeometryParser.calc_arc_length(p=tp, xt=xt, yt=yt, zt=zt)
-
-            # Compute the writhing number
-            writhing = GeometryParser.calc_writhing(i=i, t=t, x=x, y=y, z=z)
+            if not rna:
+                # Compute the writhing number
+                writhing = GeometryParser.calc_writhing(i=i, t=t, x=x, y=y, z=z)
+            else:
+                writhing = 0.0
 
             residues[int(tp)].curvature = curvature
             residues[int(tp)].torsion = torsion
             residues[int(tp)].arc_len = arc_len
             residues[int(tp)].writhing = writhing
 
-        GeometryParser.calc_dihedral_angles(chain=chain, residues=residues, deg=deg)
+        if not rna:
+            GeometryParser.calc_dihedral_angles(chain=chain, residues=residues, deg=deg)
 
         return residues, residues_map
 

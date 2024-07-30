@@ -18,7 +18,7 @@ def get_color(idt):
 
 mlab.figure(1, fgcolor=(1, 1, 1), bgcolor=(0, 0, 0), size=(800 * 2, 600 * 2))
 
-files = glob.glob("*.csv")
+files = glob.glob("*a.csv")
 
 for in_file in files:
     x = []

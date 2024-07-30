@@ -18,12 +18,12 @@ It is as simple to install as the Anaconda distribution.
 We start with creation of a new environment for **Melodia_py**.
 
 ```shell
-conda env create -f environment.yml
+conda create -n melodia_py
 ```
-or (optionally, but highly recommended)
+or (optionally, but highly recommended) replace conda for Miniforge's mamba command.
 
 ```shell
-mamba env create -f environment.yml
+mamba create -n melodia_py
 ```
 Next step is to activate the Melodia_py environment
 
@@ -35,6 +35,10 @@ Or for building and installing **Melodia_py** for source. The first step is to c
 ```shell
 git clone https://github.com/rwmontalvao/Melodia.git
 cd ./Melodia_py
+```
+```shell
+conda env create -f environment.yml
+conda activate melodia_py
 ```
 
 ```shell
