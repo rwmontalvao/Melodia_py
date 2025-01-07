@@ -60,7 +60,8 @@ class GeometryParser:
                  '__residues_map',
                  '__degrees',
                  '__gap_list',
-                 '__anomaly_list')
+                 '__anomaly_list',
+                 'RNA')
 
     def __init__(self, chain: Chain, deg: bool = True) -> None:
         """
@@ -69,12 +70,13 @@ class GeometryParser:
         :param deg: Degree?
         :type deg: bool
         """
-        residues, residues_map = GeometryParser.calc_geometry(chain=chain, deg=deg)
+        residues, residues_map, rna = GeometryParser.calc_geometry(chain=chain, deg=deg)
         self.__residues = residues
         self.__residues_map = residues_map
         self.__degrees = deg
         self.__gap_list = GeometryParser.find_gaps(chain=chain)
         self.__anomaly_list = GeometryParser.find_anomalies(chain=chain)
+        self.RNA = rna
 
     @property
     def residues(self) -> Dict[str, ResidueGeometry]:
@@ -396,7 +398,7 @@ class GeometryParser:
         return writhing
 
     @staticmethod
-    def calc_geometry(chain: Chain, deg: bool) -> tuple[dict[int, ResidueGeometry], dict[Any, int]]:
+    def calc_geometry(chain: Chain, deg: bool) -> tuple[dict[int | Any, ResidueGeometry], dict[Any, int | Any], bool]:
         """
         Function used to compute the geometric properties around residues.
         It computes curvature, torsion, arc-length and writhing number
@@ -497,7 +499,7 @@ class GeometryParser:
         if not rna:
             GeometryParser.calc_dihedral_angles(chain=chain, residues=residues, deg=deg)
 
-        return residues, residues_map
+        return residues, residues_map, rna
 
     @staticmethod
     def calc_dihedral_torsion(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray, p4: np.ndarray, deg: bool) -> float:

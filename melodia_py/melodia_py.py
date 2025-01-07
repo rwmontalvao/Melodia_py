@@ -101,6 +101,7 @@ def proc_chains(structure: Structure) -> pd.DataFrame:
     writhing = []
     angle_phi = []
     angle_psi = []
+    rna = False
     for key, value in chains.items():
         # print(key)
         tokens = key.split(':')
@@ -119,18 +120,32 @@ def proc_chains(structure: Structure) -> pd.DataFrame:
             angle_phi.append(value.residues[res_id].phi)
             angle_psi.append(value.residues[res_id].psi)
 
-    base = {'id': identity,
-            'model': model,
-            'code': pdb_code,
-            'chain': chain,
-            'order': order,
-            'name': name,
-            'curvature': curvature,
-            'torsion': torsion,
-            'arc_length': arc_length,
-            'writhing': writhing,
-            'phi': angle_phi,
-            'psi': angle_psi}
+            rna = value.RNA
+
+
+    if not rna:
+        base = {'id': identity,
+                'model': model,
+                'code': pdb_code,
+                'chain': chain,
+                'order': order,
+                'name': name,
+                'curvature': curvature,
+                'torsion': torsion,
+                'arc_length': arc_length,
+                'writhing': writhing,
+                'phi': angle_phi,
+                'psi': angle_psi}
+    else:
+        base = {'id': identity,
+                'model': model,
+                'code': pdb_code,
+                'chain': chain,
+                'order': order,
+                'name': name,
+                'curvature': curvature,
+                'torsion': torsion,
+                'arc_length': arc_length}
 
     return pd.DataFrame(base)
 
