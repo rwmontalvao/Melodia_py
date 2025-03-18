@@ -67,6 +67,9 @@ The *examples* folder contains Jupyter Notebooks, with tutorials explaining **Me
 - Antonio Marinho da Silva Neto, PhD
 - William R. Pitt, PhD
 
+### Publication
+[Melodia: a Python library for protein structure analysis ](https://academic.oup.com/bioinformatics/article/40/7/btae468/7717983)
+
 ### References
 - Montalvão R, Smith R, Lovell S, Blundell T: CHORAL: a differential geometry approach to the prediction of the cores of protein structures. Bioinformatics. 2005, 21: 3719-3725.
 - Chang PL, Rinne AW, Dewey TG: Structure alignment based on coding of local geometric measures. BMC Bioinformatics. 2006, 7:346.
