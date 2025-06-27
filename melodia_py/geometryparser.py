@@ -352,10 +352,6 @@ class GeometryParser:
         rii1 = np.zeros(3)
         ri1j1 = np.zeros(3)
 
-        # Return the number's sign
-        def sgn(v: np.ndarray) -> float:
-            return v and (1.0, -1.0)[v < 0.0]
-
         total = 0.0
         for ii in range(start, stop - 2):
             for jj in range(ii + 2, stop):
@@ -391,7 +387,7 @@ class GeometryParser:
                 omegaij = (math.asin(np.dot(aij, bij)) +
                            math.asin(np.dot(bij, cij)) +
                            math.asin(np.dot(cij, dij)) +
-                           math.asin(np.dot(dij, aij))) * sgn(np.dot(np.cross(rjj1, rii1), rij1))
+                           math.asin(np.dot(dij, aij))) * np.sign(np.dot(np.cross(rjj1, rii1), rij1))
 
                 total += omegaij / (4.0 * math.pi)
         writhing = 2.0 * total
