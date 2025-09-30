@@ -63,7 +63,7 @@ class GeometryParser:
                  '__anomaly_list',
                  'RNA')
 
-    def __init__(self, chain: Chain, deg: bool = True) -> None:
+    def __init__(self, chain: Chain.Chain, deg: bool = True) -> None:
         """
         :param chain: Protein chain
         :type chain: Chain
@@ -106,7 +106,7 @@ class GeometryParser:
         return self.__degrees
 
     @staticmethod
-    def find_gaps(chain: Chain) -> List[Tuple[int, int]]:
+    def find_gaps(chain: Chain.Chain) -> List[Tuple[int, int]]:
         """
         Find gaps in the protein's chain
         :param chain: Protein chain
@@ -151,7 +151,7 @@ class GeometryParser:
         return len(self.__gap_list) > 0
 
     @staticmethod
-    def find_anomalies(chain: Chain) -> List[str]:
+    def find_anomalies(chain: Chain.Chain) -> List[str]:
         """
         Find anomalies in the protein's chain
         :param chain: Protein chain
@@ -394,7 +394,7 @@ class GeometryParser:
         return writhing
 
     @staticmethod
-    def calc_geometry(chain: Chain, deg: bool) -> tuple[dict[int | Any, ResidueGeometry], dict[Any, int | Any], bool]:
+    def calc_geometry(chain: Chain.Chain, deg: bool) -> tuple[dict[int | Any, ResidueGeometry], dict[Any, int | Any], bool]:
         """
         Function used to compute the geometric properties around residues.
         It computes curvature, torsion, arc-length and writhing number
@@ -450,15 +450,15 @@ class GeometryParser:
             z.append(coord[2])
 
             residues[num] = ResidueGeometry(name=residue.get_resname(),
-                                                 chain=chain_id,
-                                                 res_num=num,
-                                                 res_order=pos,
-                                                 curvature=0.0,
-                                                 torsion=0.0,
-                                                 arc_len=0.0,
-                                                 writhing=0.0,
-                                                 res_ann={},
-                                                 custom=0.0)
+                                            chain=chain_id,
+                                            res_num=num,
+                                            res_order=pos,
+                                            curvature=0.0,
+                                            torsion=0.0,
+                                            arc_len=0.0,
+                                            writhing=0.0,
+                                            res_ann={},
+                                            custom=0.0)
             residues_map[pos] = num
 
             num += 1
@@ -520,7 +520,7 @@ class GeometryParser:
 
         # Normalize a vector
         def norm_vec(v: np.ndarray) -> np.ndarray:
-            return v/np.linalg.norm(v)
+            return v / np.linalg.norm(v)
 
         n1 = norm_vec(np.cross(b1, b2))
         n2 = norm_vec(np.cross(b2, b3))
@@ -537,29 +537,20 @@ class GeometryParser:
         return theta
 
     @staticmethod
-    def calc_dihedral_angles(chain: Chain, residues: Dict[int, ResidueGeometry], deg: bool) -> None:
+    def calc_dihedral_angles(chain: Chain.Chain, residues: Dict[int, ResidueGeometry], deg: bool) -> None:
         """
-        Compute the dihedral angles phi and psi.
+        Compute the dihedral angles phi and psi for a protein chain.
         :param chain: Protein chain
-        :type chain: Chain
-        :param residues:  Residue dictionary
-        :type residues: Dict[int, ResidueGeometry]
-        :param deg: angle in degrees?
-        :type deg: bool
+        :param residues: Residue dictionary
+        :param deg: Whether to return angles in degrees
         """
-        idx = [res.id[1] for res in list(chain.get_residues()) if res.id[0] == ' ']
+        # Filter only standard residues (ignore HETATM)
+        residues_list = [res for res in chain if res.id[0] == ' ']
 
-        ini = idx[+0]
-        end = idx[-2]
+        for i, residue in enumerate(residues_list):
+            pos = residue.id[1]  # residue number
 
-        num = 0
-        for i, residue in enumerate(chain):
-            # Skip invalid residues
-            het_flag, pos, insertion_code = residue.id
-            if het_flag[0] != ' ':
-                continue
-
-            # core atoms
+            # Try fetching backbone atoms
             try:
                 atom_n = residue['N'].get_coord()
                 atom_ca = residue['CA'].get_coord()
@@ -567,54 +558,30 @@ class GeometryParser:
             except KeyError:
                 pdb, model, chain_id = chain.full_id
                 print(f'Error: Missing N, CA or C atom at [{pos}] {pdb} - {model} - {chain_id}')
-                raise
+                continue
 
-            # phi
-            if pos > ini:
-                het_flag, prev_res, insertion_code = chain[idx[i - 1]].id
-
-                if abs(prev_res - pos) <= 1:
-                    try:
-                        p1 = chain[idx[i - 1]]['C'].get_coord()
-                    except KeyError:
-                        pdb, model, chain_id = chain.full_id
-                        print(f'Error: Missing C atom at [{idx[i - 1]}] {pdb} - {model} - {chain_id}')
-                        raise
-                    p2 = atom_n
-                    p3 = atom_ca
-                    p4 = atom_c
-                    phi = GeometryParser.calc_dihedral_torsion(p1=p1, p2=p2, p3=p3, p4=p4, deg=deg)
-                else:
-                    phi = 0.0
-            else:
-                phi = 0.0
-
-            # psi
-            if pos < end:
+            # ---- phi angle ----
+            if i > 0:
+                prev_res = residues_list[i - 1]
                 try:
-                    het_flag, next_res, insertion_code = chain[idx[i + 1]].id
-                except (IndexError, KeyError):
-                    pdb, model, chain_id = chain.full_id
-                    print(f'Error: after residue [{idx[i]}] {pdb} - {model} - {chain_id}')
-                    raise
-
-                if abs(next_res - pos) <= 1:
-                    p1 = atom_n
-                    p2 = atom_ca
-                    p3 = atom_c
-                    try:
-                        p4 = chain[idx[i + 1]]['N'].get_coord()
-                    except KeyError:
-                        pdb, model, chain_id = chain.full_id
-                        print(f'Error: Missing N atom at [{idx[i + 1]}] {pdb} - {model} - {chain_id}')
-                        raise
-                    psi = GeometryParser.calc_dihedral_torsion(p1=p1, p2=p2, p3=p3, p4=p4, deg=deg)
-                else:
-                    psi = 0.0
+                    p1 = prev_res['C'].get_coord()
+                    phi = GeometryParser.calc_dihedral_torsion(p1=p1, p2=atom_n, p3=atom_ca, p4=atom_c, deg=deg)
+                except KeyError:
+                    phi = None
             else:
-                psi = 0.0
+                phi = None
 
-            residues[num].phi = phi
-            residues[num].psi = psi
+            # ---- psi angle ----
+            if i < len(residues_list) - 1:
+                next_res = residues_list[i + 1]
+                try:
+                    p4 = next_res['N'].get_coord()
+                    psi = GeometryParser.calc_dihedral_torsion(p1=atom_n, p2=atom_ca, p3=atom_c, p4=p4, deg=deg)
+                except KeyError:
+                    psi = None
+            else:
+                psi = None
 
-            num += 1
+            # Store in ResidueGeometry object
+            residues[i].phi = phi
+            residues[i].psi = psi
