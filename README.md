@@ -59,6 +59,14 @@ and Knot Theory descriptors of protein and RNA structures.
 
 ### From PyPI
 ```shell
+# To avoid problems with installing NGLView from pip, download the environment.yml file from:
+https://github.com/rwmontalvao/Melodia_py.git
+
+# Create and activate the environment
+conda env create -f environment.yml
+conda activate melodia_py
+
+# Install melodia with pip
 pip install melodia-py
 ```
 
@@ -68,12 +76,11 @@ pip install melodia-py
 |---|---|---|
 | `fast` | numba, llvmlite | JIT-compiled writhing (~8× faster) |
 | `parallel` | joblib | Multi-core model processing |
-| `viz` | nglview, ipywidgets | 3D structure viewer in Jupyter |
 | `dev` | pytest, mypy, ruff, pre-commit | Development tools |
 | `all` | all of the above | Everything |
 
 ```shell
-pip install "melodia-py[all]"
+pip install "melodia-py[fast,parallel]"
 ```
 
 ### From source (recommended for development)

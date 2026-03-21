@@ -58,6 +58,7 @@ dependencies = [
     "matplotlib>=3.10",
     "sty>=1.0",          # terminal colour output in show_align()
     "importlib_resources>=6.4",
+    "dill>=0.4",
 ]
 
 # ---------------------------------------------------------------------------
@@ -66,7 +67,6 @@ dependencies = [
 # Install with:
 #   pip install melodia-py[fast]          # Numba JIT writhing
 #   pip install melodia-py[parallel]      # joblib batch processing
-#   pip install melodia-py[viz]           # nglview 3-D visualisation
 #   pip install melodia-py[dev]           # testing + linting tools
 #   pip install melodia-py[all]           # everything above
 # ---------------------------------------------------------------------------
@@ -84,13 +84,6 @@ fast = [
 parallel = [
     # joblib parallel batch processing via parse_structures().
     "joblib>=1.4",
-]
-
-viz = [
-    # nglview 3-D structure viewer (Jupyter widget).
-    # Requires a running Jupyter environment.
-    "nglview>=3.1",
-    "ipywidgets>=8.1",
 ]
 
 dev = [
