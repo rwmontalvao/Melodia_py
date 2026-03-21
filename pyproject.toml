@@ -11,7 +11,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name        = "melodia-py"
-version     = "0.1.4"
+version     = "0.1.7"
 description = "Prontein and RNA/DNA/XNA geometry analsys"  
 readme      = "README.md"
 license     = { text = "Apache-2.0" }

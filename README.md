@@ -8,7 +8,7 @@ and Knot Theory descriptors of protein and RNA structures.
 
 ---
 
-## What's new in v0.1.5
+## What's new in v0.1.7
 
 ### Performance
 - **Parallel model processing** — `geometry_from_structure_file` and
