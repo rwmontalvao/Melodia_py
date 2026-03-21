@@ -1,0 +1,170 @@
+# pyproject.toml — melodia_py
+# Replace every <PLACEHOLDER> before publishing to PyPI.
+
+[build-system]
+requires      = ["setuptools>=70.0,<72", "wheel>=0.43"]
+build-backend = "setuptools.build_meta"
+
+# ---------------------------------------------------------------------------
+# Project metadata
+# ---------------------------------------------------------------------------
+
+[project]
+name        = "melodia-py"
+version     = "0.1.4"
+description = "Prontein and RNA/DNA/XNA geometry analsys"  
+readme      = "README.md"
+license     = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+
+authors = [
+    { name = "Rinaldo Wander Montalvão" },
+]
+
+keywords = [
+    "bioinformatics",
+    "protein structure",
+    "differential geometry",
+    "structural alignment",
+    "PDB",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
+
+# ---------------------------------------------------------------------------
+# Core runtime dependencies
+# Versions are lower-bounded at what is tested in the conda environment;
+# upper bounds are intentionally omitted to avoid unnecessary breakage.
+# ---------------------------------------------------------------------------
+
+dependencies = [
+    "biopython>=1.85",
+    "numpy>=2.0",
+    "scipy>=1.15",
+    "pandas>=2.3",
+    "scikit-learn>=1.7",
+    "seaborn>=0.13",
+    "matplotlib>=3.10",
+    "sty>=1.0",          # terminal colour output in show_align()
+    "importlib_resources>=6.4",
+]
+
+# ---------------------------------------------------------------------------
+# Optional dependency groups
+#
+# Install with:
+#   pip install melodia-py[fast]          # Numba JIT writhing
+#   pip install melodia-py[parallel]      # joblib batch processing
+#   pip install melodia-py[viz]           # nglview 3-D visualisation
+#   pip install melodia-py[dev]           # testing + linting tools
+#   pip install melodia-py[all]           # everything above
+# ---------------------------------------------------------------------------
+
+[project.optional-dependencies]
+
+fast = [
+    # Numba JIT compilation for calc_writhing_jit().
+    # Note: install melodia-py as a wheel (pip install .), NOT as an egg,
+    # so that Numba's cache locator can find the source file on disk.
+    "numba>=0.59",
+    "llvmlite>=0.42",    # pinned transitively by numba; listed explicitly
+]
+
+parallel = [
+    # joblib parallel batch processing via parse_structures().
+    "joblib>=1.4",
+]
+
+viz = [
+    # nglview 3-D structure viewer (Jupyter widget).
+    # Requires a running Jupyter environment.
+    "nglview>=3.1",
+    "ipywidgets>=8.1",
+]
+
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "mypy>=1.10",
+    "ruff>=0.4",          # linter + formatter
+    "pre-commit>=3.7",
+    "types-setuptools",
+]
+
+all = [
+    "melodia-py[fast]",
+    "melodia-py[parallel]",
+    "melodia-py[viz]",
+    "melodia-py[dev]",
+]
+
+# ---------------------------------------------------------------------------
+# URLs
+# ---------------------------------------------------------------------------
+
+# [project.urls]
+# Uncomment and fill in once you have a repository:
+# Homepage      = "https://github.com/<your-org>/melodia_py"
+# Repository    = "https://github.com/<your-org>/melodia_py"
+# "Bug Tracker" = "https://github.com/<your-org>/melodia_py/issues"
+
+# ---------------------------------------------------------------------------
+# Package discovery
+# setuptools will find all packages under src/ if you use the src layout,
+# or auto-discover from the project root (current layout).
+# ---------------------------------------------------------------------------
+
+[tool.setuptools.packages.find]
+where   = ["."]
+include = ["melodia_py*"]
+exclude = ["tests*", "docs*"]
+
+# Include non-Python data files bundled inside the package
+# (e.g. melodia_py/data/luthier.dat used by PropensityTable).
+
+[tool.setuptools.package-data]
+"melodia_py" = ["data/*"]
+
+# ---------------------------------------------------------------------------
+# Tool configuration
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths    = ["tests"]
+addopts      = "-v --tb=short --cov=melodia_py --cov-report=term-missing"
+
+[tool.mypy]
+python_version         = "3.10"
+strict                 = true
+ignore_missing_imports = true   # biopython has incomplete stubs
+
+[tool.ruff]
+target-version = "py310"
+line-length    = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "NPY", # numpy-specific rules
+]
+ignore = [
+    "E501",  # line too long — handled by formatter
+    "B008",  # do not perform function calls in default arguments
+]

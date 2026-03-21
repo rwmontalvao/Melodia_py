@@ -15,678 +15,812 @@
 # Author: Rinaldo Wander Montalvão, PhD
 #
 import os
-from typing_extensions import SupportsIndex
+from typing import Dict, List, Optional, Tuple, Any
 
 import Bio.Align
-
 import pandas as pd
 import nglview as nv
 import seaborn as sns
 
-from typing import Dict, Tuple, List, Any
 from ipywidgets import Box
-
 from Bio import AlignIO
 from Bio.PDB import PDBParser
 from Bio.PDB.Structure import Structure
+from joblib import Parallel, delayed
 
 from melodia_py.geometryparser import GeometryParser
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering
-
 from importlib import resources as importlib_resources
 
-def geometry_from_structure_file(file_name: str) -> pd.DataFrame:
+
+# ---------------------------------------------------------------------------
+# Ramachandran bin definitions for PropensityTable.get_score
+# Bins derived from: Kleywegt & Jones (1996) Ramachandran revisited.
+# Each entry is (phi_min, phi_max, psi_min, psi_max).
+# ---------------------------------------------------------------------------
+_RAMA_BINS: List[Tuple[float, float, float, float]] = [
+    (-180.0,   0.0,  -90.0,   45.0),
+    (-110.0,   0.0,  100.0,  180.0),
+    (-110.0,   0.0, -180.0,  -90.0),
+    (-180.0, -110.0,  100.0,  180.0),
+    (-180.0, -110.0, -180.0,  -90.0),
+    (-180.0,   0.0,   45.0,  100.0),
+    (  20.0, 140.0,  -40.0,   80.0),
+    (   0.0, 180.0, -180.0,  -40.0),
+    (   0.0, 180.0,   80.0,  180.0),
+]
+_RAMA_TAB_MAP: List[int] = [0, 1, 1, 2, 2, 3, 4, 5, 5]
+
+
+# ---------------------------------------------------------------------------
+# Structure → DataFrame helpers
+# ---------------------------------------------------------------------------
+
+def geometry_from_structure_file(
+    file_name: str,
+    n_jobs: int = 1,
+    rna_atom: str = "C4'",
+    deg: bool = True,
+) -> pd.DataFrame:
     """
-         Function used to compute the geometric properties around residues
-         for (BioPython compatible) structures.
-         It computes curvature, torsion, arc-length and writhing number
-         :param file_name: Protein file name
-         :type file_name: String
-         :return: Pandas dataframe
-         :rtype: pd.DataFrame
+    Parse a PDB file and compute per-residue geometric properties.
+
+    For multi-model files (NMR ensembles, MD trajectories), set ``n_jobs=-1``
+    to parallelise across all models × chains using all available CPUs.
+
+    :param file_name: Path to the PDB file
+    :param n_jobs: Number of parallel worker processes.
+        ``1`` = sequential (default). ``-1`` = all CPUs.
+    :param rna_atom: Backbone atom for RNA chains (default ``"C4'"``)
+    :param deg: Return phi/psi in degrees (True) or radians (False)
+    :return: DataFrame with curvature, torsion, arc_length, writhing, phi, psi
     """
-    parser = PDBParser()
-    name, ext = os.path.splitext(file_name)
+    name, _ = os.path.splitext(os.path.basename(file_name))
+    parser = PDBParser(QUIET=True)
     structure = parser.get_structure(name, file_name)
-
-    base = proc_chains(structure)
-
-    return base
+    return proc_chains(structure, n_jobs=n_jobs, rna_atom=rna_atom, deg=deg)
 
 
-def geometry_from_structure(structure: Structure) -> pd.DataFrame:
+def geometry_from_structure(
+    structure: Structure,
+    n_jobs: int = 1,
+    rna_atom: str = "C4'",
+    deg: bool = True,
+) -> pd.DataFrame:
     """
-         Function used to compute the geometric properties around residues
-         for (BioPython compatible) structures.
-         It computes curvature, torsion, arc-length and writhing number
-         :param structure: BioPython PDB Structure class
-         :type structure: Structure
-         :return: Panda dataframe
-         :rtype: pd.DataFrame
+    Compute per-residue geometric properties from a BioPython Structure object.
+
+    :param structure: BioPython PDB Structure
+    :param n_jobs: Number of parallel worker processes.
+        ``1`` = sequential (default). ``-1`` = all CPUs.
+    :param rna_atom: Backbone atom for RNA chains (default ``"C4'"``)
+    :param deg: Return phi/psi in degrees (True) or radians (False)
+    :return: DataFrame with curvature, torsion, arc_length, writhing, phi, psi
     """
-    base = proc_chains(structure)
-
-    return base
+    return proc_chains(structure, n_jobs=n_jobs, rna_atom=rna_atom, deg=deg)
 
 
-def proc_chains(structure: Structure) -> pd.DataFrame:
+# ---------------------------------------------------------------------------
+# Model coordinate extraction (runs in parent process, BioPython-safe)
+# ---------------------------------------------------------------------------
+
+def _extract_model_data(
+    model,
+    pdb_code: str,
+    rna_atom: str,
+) -> Optional[dict]:
     """
-         Function used to compute the geometric properties around residues
-         for (BioPython compatible) structures.
-         It computes curvature, torsion, arc-length and writhing number
-         :param structure: BioPython PDB Structure class
-         :type structure: Structure
-         :return: Panda dataframe
-         :rtype: pd.DataFrame
+    Extract all coordinate data for every chain in one model into plain
+    Python/numpy objects that are cheap to pickle.
+
+    Runs in the **parent** process. Workers receive only the returned dict —
+    no BioPython objects cross the process boundary.
+
+    :return: Dict with keys: model_id, pdb_code, chains (list of chain dicts)
+             Each chain dict contains: chain_id, rna, coords, residue_meta,
+             backbone (list of (N, CA, C) triples or empty for RNA).
+    """
+    from melodia_py.geometryparser import _RNA_RESIDUE_NAMES
+
+    model_id = int(model.id)
+    chain_data = []
+
+    for chain in model:
+        all_res = [r for r in chain.get_residues() if r.id[0] == ' ']
+        if not all_res:
+            continue
+
+        rna  = all_res[0].get_resname() in _RNA_RESIDUE_NAMES
+        atom = rna_atom if rna else 'CA'
+
+        needs_fallback = rna and atom in ("P", "C5'")
+        last_pos = all_res[-1].id[1] if needs_fallback else None
+
+        coords:       List[List[float]] = []
+        residue_meta: List[Tuple[str, int]] = []
+        backbone:     List[Optional[Tuple]] = []
+
+        for res in all_res:
+            pos = res.id[1]
+
+            if atom in res:
+                coord = res[atom].get_coord().tolist()
+            elif needs_fallback and pos == last_pos:
+                coord = next(res.get_atoms()).get_coord().tolist()
+            else:
+                print(f'Warning: missing {atom} at {res.get_resname()} {pos} '
+                      f'chain {chain.id} model {model_id} — skipped')
+                continue
+
+            coords.append(coord)
+            residue_meta.append((res.get_resname(), pos))
+
+            if not rna:
+                try:
+                    n  = res['N'].get_coord().tolist()
+                    ca = res['CA'].get_coord().tolist()
+                    c  = res['C'].get_coord().tolist()
+                    backbone.append((n, ca, c))
+                except KeyError:
+                    backbone.append(None)
+
+        if len(coords) < 2:
+            continue
+
+        chain_data.append({
+            'chain_id':     chain.id,
+            'rna':          rna,
+            'coords':       coords,
+            'residue_meta': residue_meta,
+            'backbone':     backbone,
+        })
+
+    if not chain_data:
+        return None
+
+    return {
+        'model_id':  model_id,
+        'pdb_code':  pdb_code,
+        'chains':    chain_data,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Worker function — processes all chains of one model (no BioPython objects)
+# ---------------------------------------------------------------------------
+
+def _compute_model_geometry(task: dict, deg: bool) -> List[dict]:
+    """
+    Compute geometry for every chain in one model.
+
+    Receives only plain dicts/lists — no BioPython objects.
+    Safe to run in a separate loky worker process.
+
+    :param task: Output of _extract_model_data()
+    :param deg: Return dihedral angles in degrees
+    :return: Flat list of per-residue record dicts for all chains
+    """
+    import numpy as np
+    from scipy.interpolate import CubicSpline
+    from melodia_py.geometryparser import (
+        GeometryParser, _NORM_EPS, _calc_writhing_jit,
+    )
+
+    model_id = task['model_id']
+    pdb_code = task['pdb_code']
+    rows: List[dict] = []
+
+    for chain in task['chains']:
+        chain_id     = chain['chain_id']
+        rna          = chain['rna']
+        coords       = chain['coords']
+        residue_meta = chain['residue_meta']
+        backbone     = chain['backbone']
+
+        n_res = len(coords)
+        t = list(range(n_res))
+        x = [c[0] for c in coords]
+        y = [c[1] for c in coords]
+        z = [c[2] for c in coords]
+
+        xt = CubicSpline(t, x, bc_type='natural')
+        yt = CubicSpline(t, y, bc_type='natural')
+        zt = CubicSpline(t, z, bc_type='natural')
+
+        xa = np.ascontiguousarray(x, dtype=np.float64)
+        ya = np.ascontiguousarray(y, dtype=np.float64)
+        za = np.ascontiguousarray(z, dtype=np.float64)
+
+        ini, end = 0, n_res - 1
+
+        for i, (resname, pos) in enumerate(residue_meta):
+            p_curv = float(t[1]) if i == ini else (float(t[-2]) if i == end else float(i))
+
+            curvature, torsion = GeometryParser.calc_curvature_torsion(
+                p=p_curv, t=t, xt=xt, yt=yt, zt=zt
+            )
+            arc_len  = GeometryParser.calc_arc_length(p=float(i), xt=xt, yt=yt, zt=zt)
+            writhing = (
+                float(_calc_writhing_jit(i, xa, ya, za, _NORM_EPS))
+                if not rna else 0.0
+            )
+
+            row: dict = {
+                'id':         i,
+                'model':      model_id,
+                'code':       pdb_code,
+                'chain':      chain_id,
+                'order':      pos,
+                'name':       resname,
+                'curvature':  curvature,
+                'torsion':    torsion,
+                'arc_length': arc_len,
+                'writhing':   writhing,
+            }
+
+            if not rna:
+                phi: Optional[float] = None
+                psi: Optional[float] = None
+
+                bb = backbone[i]
+                if bb is not None:
+                    n_coord  = np.array(bb[0])
+                    ca_coord = np.array(bb[1])
+                    c_coord  = np.array(bb[2])
+
+                    if i > 0 and backbone[i - 1] is not None:
+                        prev_c = np.array(backbone[i - 1][2])
+                        phi = GeometryParser.calc_dihedral_torsion(
+                            p1=prev_c, p2=n_coord, p3=ca_coord, p4=c_coord, deg=deg
+                        )
+                    if i < n_res - 1 and backbone[i + 1] is not None:
+                        next_n = np.array(backbone[i + 1][0])
+                        psi = GeometryParser.calc_dihedral_torsion(
+                            p1=n_coord, p2=ca_coord, p3=c_coord, p4=next_n, deg=deg
+                        )
+                row['phi'] = phi
+                row['psi'] = psi
+
+            rows.append(row)
+
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def proc_chains(
+    structure: Structure,
+    n_jobs: int = 1,
+    rna_atom: str = "C4'",
+    deg: bool = True,
+) -> pd.DataFrame:
+    """
+    Compute per-residue geometry for every model and chain in *structure*,
+    returning a tidy DataFrame.
+
+    Parallelism is **across models** — each worker process handles all chains
+    of one model. This is the natural unit of work for multi-model files
+    (NMR ensembles, MD trajectories) where models are independent conformations.
+
+    BioPython Chain objects are never sent to workers. Coordinates are
+    extracted as plain lists in the parent process and dispatched as small
+    dicts, keeping pickle overhead minimal.
+
+    :param structure: BioPython PDB Structure
+    :param n_jobs: Number of parallel worker processes.
+        ``1`` = sequential (default). ``-1`` = all CPUs.
+        For a 300-model ensemble with 8 cores, expect ~8× speedup.
+    :param rna_atom: Backbone atom for RNA chains (default ``"C4'"``)
+    :param deg: Return phi/psi in degrees (True) or radians (False)
+    :return: DataFrame with one row per residue
     """
     pdb_code = structure.id.upper()
-    chains = {}
+
+    # Extract coordinate data for every model in the parent process.
+    # BioPython objects never leave this process.
+    tasks = []
     for model in structure:
-        for chain in model:
-            chain_id = chain.id
-            key = f'{pdb_code}:{model.id}:{chain_id}'
-            chains[key] = GeometryParser(chain)
+        task = _extract_model_data(model, pdb_code, rna_atom)
+        if task is not None:
+            tasks.append(task)
 
-    # Generate a Pandas Dataframe
-    identity = []
-    model = []
-    chain = []
-    order = []
-    name = []
-    curvature = []
-    torsion = []
-    arc_length = []
-    writhing = []
-    angle_phi = []
-    angle_psi = []
-    rna = False
-    for key, value in chains.items():
-        # print(key)
-        tokens = key.split(':')
+    if not tasks:
+        return pd.DataFrame()
 
-        for res_id in value.residues:
-            model.append(int(tokens[1]))
-            chain.append(tokens[2])
+    # Dispatch one task per model to the loky worker pool.
+    # Each worker processes all chains of its model sequentially.
+    nested: List[List[dict]] = Parallel(n_jobs=n_jobs)(
+        delayed(_compute_model_geometry)(task, deg)
+        for task in tasks
+    )
 
-            identity.append(value.residues[res_id].res_num)
-            order.append(value.residues[res_id].res_order)
-            name.append(value.residues[res_id].name)
-            curvature.append(value.residues[res_id].curvature)
-            torsion.append(value.residues[res_id].torsion)
-            arc_length.append(value.residues[res_id].arc_len)
-            writhing.append(value.residues[res_id].writhing)
-            angle_phi.append(value.residues[res_id].phi)
-            angle_psi.append(value.residues[res_id].psi)
+    records = [row for model_rows in nested for row in model_rows]
+    return pd.DataFrame(records)
 
-            rna = value.RNA
-
-
-    if not rna:
-        base = {'id': identity,
-                'model': model,
-                'code': pdb_code,
-                'chain': chain,
-                'order': order,
-                'name': name,
-                'curvature': curvature,
-                'torsion': torsion,
-                'arc_length': arc_length,
-                'writhing': writhing,
-                'phi': angle_phi,
-                'psi': angle_psi}
-    else:
-        base = {'id': identity,
-                'model': model,
-                'code': pdb_code,
-                'chain': chain,
-                'order': order,
-                'name': name,
-                'curvature': curvature,
-                'torsion': torsion,
-                'arc_length': arc_length}
-
-    return pd.DataFrame(base)
 
 
 def geometry_dict_from_structure(structure: Structure) -> Dict[str, GeometryParser]:
     """
-         Function used to compute the geometric properties around residues
-         for (BioPython compatible) structures.
-         It computes curvature, torsion, arc-length and writhing number
-         :param structure: BioPython PDB Structure class
-         :type structure: Structure
-         :return: Geometry Dictionary
-         :rtype: Dict[str, GeometryParser]
+    Build a mapping of 'model_id:chain_id' → GeometryParser for all chains
+    that contain at least one standard residue.
+
+    :param structure: BioPython PDB Structure
+    :return: Dict of GeometryParser objects keyed by 'model:chain'
     """
-    chains = {}
+    chains: Dict[str, GeometryParser] = {}
     for model in structure:
         for chain in model:
-            chain_id = chain.id
-            key = f'{model.id}:{chain_id}'
-            residues = [res.id[1] for res in list(chain.get_residues()) if res.id[0] == ' ']
-            if residues:
+            has_standard = any(
+                res.id[0] == ' ' for res in chain.get_residues()
+            )
+            if has_standard:
+                key = f'{model.id}:{chain.id}'
                 chains[key] = GeometryParser(chain)
-
     return chains
 
 
-def bfactor_from_geo(structure: Structure, attribute: str, geo: Dict[str, GeometryParser] = None) -> None:
-    """
-        Set the PDB bfactor to geometric values
-         :param structure: BioPython PDB Structure class
-         :type structure: Structure
-         :param attribute: geometric attribute
-         :type attribute: str
-        :param geo: Geometry Dictionary
-        :type: Dict[str, GeometryParser]
+# ---------------------------------------------------------------------------
+# B-factor mapping
+# ---------------------------------------------------------------------------
 
+def bfactor_from_geo(
+    structure: Structure,
+    attribute: str,
+    geo: Optional[Dict[str, GeometryParser]] = None,
+) -> None:
+    """
+    Set every atom's B-factor to a geometric property value.
+
+    :param structure: BioPython PDB Structure (mutated in place)
+    :param attribute: One of 'curvature', 'torsion', 'custom'
+    :param geo: Pre-computed geometry dict; computed from structure if None
     """
     if geo is None:
         geo = geometry_dict_from_structure(structure)
 
-    # Set all atoms' bfactors to a minimal values
-    min_values = []
-    for key in geo:
+    def _get_val(gp: GeometryParser, res_idx: int) -> float:
+        res = gp.residues[res_idx]
         if attribute == 'curvature':
-            min_values.append(min([res.curvature for res in geo[key].residues.values()]))
-        elif attribute == 'torsion':
-            min_values.append(min([res.torsion for res in geo[key].residues.values()]))
-        elif attribute == 'custom':
-            min_values.append(min([res.custom for res in geo[key].residues.values()]))
-        else:
-            min_values.append(0.0)
+            return res.curvature
+        if attribute == 'torsion':
+            return res.torsion
+        if attribute == 'custom':
+            return res.custom
+        return 0.0
 
-    min_value = min(min_values)
+    # Determine global minimum for default fill
+    min_value = min(
+        _get_val(gp, res_idx)
+        for gp in geo.values()
+        for res_idx in gp.residues
+    ) if attribute in ('curvature', 'torsion', 'custom') else 0.0
+
     for atom in structure.get_atoms():
         if atom.is_disordered():
-            for disordered_atom in atom.disordered_get_list():
-                disordered_atom.set_bfactor(min_value)
+            for da in atom.disordered_get_list():
+                da.set_bfactor(min_value)
         else:
             atom.set_bfactor(min_value)
 
-    # Change bfactors to a differential geometry value
     for model in structure:
         for chain in model:
             for atom in chain.get_atoms():
-                het_flag, sequence_id, insertion_code = atom.get_parent().id
-                if het_flag[0] == " ":
+                het_flag, sequence_id, _ = atom.get_parent().id
+                if het_flag[0] == ' ':
                     key = f'{model.id}:{chain.id}'
-                    res = geo[key].residues_map[sequence_id]
-
-                    if attribute == 'curvature':
-                        value = geo[key].residues[res].curvature
-                    elif attribute == 'torsion':
-                        value = geo[key].residues[res].torsion
-                    elif attribute == 'custom':
-                        value = geo[key].residues[res].custom
-                    else:
-                        value = 0.0
-
-                    atom.set_bfactor(value)
+                    res_idx = geo[key].residues_map[sequence_id]
+                    atom.set_bfactor(_get_val(geo[key], res_idx))
 
 
-def view_putty(structure: Structure, radius_scale=1.0, width=1200, height=600) -> Box:
-    """
-        Display PDB structure as a putty model
-        :param structure: BioPython PDB Structure class
-        :type structure: Structure
-        :param radius_scale: Radius Scale
-        :type width: float
-        :param width: Widget width
-        :type width: int
-        :param height: Widget height
-        :type height: int
-    """
+# ---------------------------------------------------------------------------
+# NGL viewers
+# ---------------------------------------------------------------------------
+
+def _make_view(structure: Structure, representation: dict, width: int, height: int) -> Box:
     view = nv.show_biopython(structure)
-    view.representations = [
-        {"type": "tube",
-         "params": {
-             "sele": "protein",
-             "radius": "bfactor",
-             "radiusScale": radius_scale,
-             "color": "bfactor",
-             "colorScale": "RdYlBu"
-         }}
-    ]
+    view.representations = [representation]
     view.layout.width = '100%'
     view.layout.height = '100%'
-
     box = Box([view])
     box.layout.width = f'{width}px'
     box.layout.height = f'{height}px'
-
     return box
 
 
-def view_cartoon(structure: Structure, width=1200, height=600) -> Box:
+def view_putty(structure: Structure, radius_scale: float = 1.0, width: int = 1200, height: int = 600) -> Box:
+    """Display PDB structure as a putty (tube-radius-by-bfactor) model."""
+    return _make_view(structure, {
+        'type': 'tube',
+        'params': {
+            'sele': 'protein',
+            'radius': 'bfactor',
+            'radiusScale': radius_scale,
+            'color': 'bfactor',
+            'colorScale': 'RdYlBu',
+        },
+    }, width, height)
+
+
+def view_cartoon(structure: Structure, width: int = 1200, height: int = 600) -> Box:
+    """Display PDB structure as a cartoon coloured by B-factor."""
+    return _make_view(structure, {
+        'type': 'cartoon',
+        'params': {'sele': 'protein', 'color': 'bfactor', 'colorScale': 'RdYlBu'},
+    }, width, height)
+
+
+def view_tube(structure: Structure, width: int = 1200, height: int = 600) -> Box:
+    """Display PDB structure as a tube coloured by B-factor."""
+    return _make_view(structure, {
+        'type': 'tube',
+        'params': {'sele': 'protein', 'color': 'bfactor', 'colorScale': 'RdYlBu'},
+    }, width, height)
+
+
+# ---------------------------------------------------------------------------
+# PIR alignment parser
+# ---------------------------------------------------------------------------
+
+# Standard 3-letter to 1-letter amino acid code mapping
+_C321: Dict[str, str] = {
+    'CYS': 'C', 'ASP': 'D', 'SER': 'S', 'GLN': 'Q', 'LYS': 'K',
+    'ILE': 'I', 'PRO': 'P', 'THR': 'T', 'PHE': 'F', 'ASN': 'N',
+    'GLY': 'G', 'HIS': 'H', 'LEU': 'L', 'ARG': 'R', 'TRP': 'W',
+    'ALA': 'A', 'VAL': 'V', 'GLU': 'E', 'TYR': 'Y', 'MET': 'M',
+}
+
+
+def parser_pir_file(
+    pir_file: str,
+    structure_dir: str = '.',
+) -> Bio.Align.MultipleSeqAlignment:
     """
-        Display PDB structure as a cartoon model
-        :param structure: BioPython PDB Structure class
-        :type structure: Structure
-        :param width: Widget width
-        :type width: int
-        :param height: Widget height
-        :type height: int
+    Parse a PIR alignment file and annotate each structure record with
+    per-position geometric properties.
+
+    :param pir_file: Path to the PIR alignment file
+    :param structure_dir: Directory containing the PDB files referenced in the
+        alignment. Defaults to the current working directory.
+    :return: Annotated MultipleSeqAlignment
     """
-    view = nv.show_biopython(structure)
-    view.representations = [
-        {"type": "cartoon",
-         "params": {
-             "sele": "protein",
-             "color": "bfactor",
-             "colorScale": "RdYlBu"
-         }}
-    ]
-    view.layout.width = '100%'
-    view.layout.height = '100%'
-
-    box = Box([view])
-    box.layout.width = f'{width}px'
-    box.layout.height = f'{height}px'
-
-    return box
-
-
-def view_tube(structure: Structure, width=1200, height=600) -> Box:
-    """
-        Display PDB structure as a tube model
-        :param structure: BioPython PDB Structure class
-        :type structure: Structure
-        :param width: Widget width
-        :type width: int
-        :param height: Widget height
-        :type height: int
-    """
-    view = nv.show_biopython(structure)
-    view.representations = [
-        {"type": "tube",
-         "params": {
-             "sele": "protein",
-             "color": "bfactor",
-             "colorScale": "RdYlBu"
-         }}
-    ]
-    view.layout.width = '100%'
-    view.layout.height = '100%'
-
-    box = Box([view])
-    box.layout.width = f'{width}px'
-    box.layout.height = f'{height}px'
-
-    return box
-
-
-def parser_pir_file(pir_file: str) -> Bio.Align.MultipleSeqAlignment:
-    """
-        Parser for PIR alignment file and associated PDB structures
-        :param pir_file: BioPython PDB Structure class
-        :type pir_file: str
-        :return: Protein sequence alignment
-        :rtype: Bio.Align.MultipleSeqAlignment
-    """
-    c321 = {'CYS': 'C', 'ASP': 'D', 'SER': 'S', 'GLN': 'Q', 'LYS': 'K',
-            'ILE': 'I', 'PRO': 'P', 'THR': 'T', 'PHE': 'F', 'ASN': 'N',
-            'GLY': 'G', 'HIS': 'H', 'LEU': 'L', 'ARG': 'R', 'TRP': 'W',
-            'ALA': 'A', 'VAL': 'V', 'GLU': 'E', 'TYR': 'Y', 'MET': 'M'}
-
+    # FIX [style]: Accept structure_dir so callers are not forced to run from
+    # the directory that contains the PDB files.
     align = AlignIO.read(pir_file, 'pir')
+    parser = PDBParser(QUIET=True)
 
-    parser = PDBParser()
     for record in align:
-        # Only select structures
-        if record.description[:9] != 'structure':
+        if not record.description.startswith('structure'):
             continue
 
-        file_name = f'{record.id}.pdb'
+        pdb_path = os.path.join(structure_dir, f'{record.id}.pdb')
+        structure = parser.get_structure(record.id, pdb_path)
 
-        structure = parser.get_structure(record.id, file_name)
-
-        # Renumber the residues to start with 1
+        # Renumber residues starting at 1 (two-pass to avoid id collisions)
         residue_number = 1
         for model in structure:
             for chain in model:
                 for residue in chain:
-                    # print(residue.id)
                     residue.id = (residue.id[0], residue_number, 'Z')
                     residue_number += 1
                 for residue in chain:
                     residue.id = (residue.id[0], residue.id[1], ' ')
-                    # print('----', residue.id)
 
         geo = geometry_dict_from_structure(structure)
 
-        curvature = []
-        torsion = []
-        arc_length = []
-        writhing = []
-        phi = []
-        psi = []
+        # Build a flat ordered index of (chain_key, res_idx) pairs
+        idx: List[Tuple[str, int]] = [
+            (key, res)
+            for key in geo
+            for res in geo[key].residues
+        ]
 
-        idx = []
-        for key in geo:
-            for res in geo[key].residues:
-                idx.append((key, res))
+        # FIX [correctness]: Use None for gap positions so consumers can
+        # distinguish "no angle computed" from a genuine angle of 0.0.
+        curvature: List[Optional[float]] = []
+        torsion:   List[Optional[float]] = []
+        arc_length: List[Optional[float]] = []
+        writhing:  List[Optional[float]] = []
+        phi:       List[Optional[float]] = []
+        psi:       List[Optional[float]] = []
+
         j = 0
-        for i, letter in enumerate(record.seq):
-            if letter != '-' and letter != '/':
+        for letter in record.seq:
+            if letter not in ('-', '/'):
+                curr_chain, curr_residue = idx[j]
+                res = geo[curr_chain].residues[curr_residue]
                 try:
-                    curr_chain = idx[j][0]
-                    curr_residue = idx[j][1]
-                    res_code = c321[geo[curr_chain].residues[curr_residue].name]
+                    res_code = _C321[res.name]
                 except KeyError:
-                    raise NameError(f'Alignment error: {record.id} {curr_chain} residue {curr_residue + 1} {letter}')
+                    raise NameError(
+                        f'Alignment error: {record.id} {curr_chain} '
+                        f'residue {curr_residue + 1} — unknown residue {res.name}'
+                    )
                 if letter != res_code:
-                    raise NameError(f'Alignment error: {record.id} res={i + 1} seq={letter} pdb={res_code}')
-                curvature.append(geo[curr_chain].residues[curr_residue].curvature)
-                torsion.append(geo[curr_chain].residues[curr_residue].torsion)
-                arc_length.append(geo[curr_chain].residues[curr_residue].arc_len)
-                writhing.append(geo[curr_chain].residues[curr_residue].writhing)
-                phi.append(geo[curr_chain].residues[curr_residue].phi)
-                psi.append(geo[curr_chain].residues[curr_residue].psi)
+                    raise NameError(
+                        f'Alignment error: {record.id} seq={letter} pdb={res_code} '
+                        f'at chain={curr_chain} res={curr_residue + 1}'
+                    )
+                curvature.append(res.curvature)
+                torsion.append(res.torsion)
+                arc_length.append(res.arc_len)
+                writhing.append(res.writhing)
+                phi.append(res.phi)
+                psi.append(res.psi)
                 j += 1
             else:
-                curvature.append(0.0)
-                torsion.append(0.0)
-                arc_length.append(0.0)
-                writhing.append(0.0)
-                phi.append(0.0)
-                psi.append(0.0)
+                curvature.append(None)
+                torsion.append(None)
+                arc_length.append(None)
+                writhing.append(None)
+                phi.append(None)
+                psi.append(None)
 
-        record.letter_annotations['curvature'] = curvature
-        record.letter_annotations['torsion'] = torsion
+        record.letter_annotations['curvature']  = curvature
+        record.letter_annotations['torsion']    = torsion
         record.letter_annotations['arc_length'] = arc_length
-        record.letter_annotations['writhing'] = writhing
-        record.letter_annotations['phi'] = phi
-        record.letter_annotations['psi'] = psi
+        record.letter_annotations['writhing']   = writhing
+        record.letter_annotations['phi']        = phi
+        record.letter_annotations['psi']        = psi
 
     return align
 
 
-def dataframe_from_alignment(align: Bio.Align.MultipleSeqAlignment, keys=None) -> pd.DataFrame:
+def dataframe_from_alignment(
+    align: Bio.Align.MultipleSeqAlignment,
+    keys: Optional[List[str]] = None,
+) -> pd.DataFrame:
     """
-         Create a Pandas Dataframe from an annotated alignment
-         :param align: Protein alignment
-         :type align: Bio.Align.MultipleSeqAlignment
-         :param keys: keys for the annotations
-         :type keys: list
-         :return: Pandas dataframe
-         :rtype: pd.DataFrame
-    """
-    data = {}
+    Build a DataFrame from an annotated alignment, with one column per
+    (annotation × structure) combination.
 
+    :param align: Annotated MultipleSeqAlignment (from parser_pir_file)
+    :param keys: Annotation keys to include; defaults to all available keys
+    :return: DataFrame
+    """
+    data: Dict[str, list] = {}
     for record in align:
-        if record.description[:9] == 'structure':
-            data[f'seq_{record.id}'] = list(record.seq)
-            if keys is None:
-                items = record.letter_annotations.keys()
-            else:
-                items = keys
-            for key in items:
-                data[f'{key}_{record.id}'] = record.letter_annotations[key]
-
+        if not record.description.startswith('structure'):
+            continue
+        data[f'seq_{record.id}'] = list(record.seq)
+        items = keys if keys is not None else list(record.letter_annotations.keys())
+        for key in items:
+            data[f'{key}_{record.id}'] = record.letter_annotations[key]
     return pd.DataFrame.from_dict(data)
 
 
+# ---------------------------------------------------------------------------
+# Propensity table
+# ---------------------------------------------------------------------------
+
 class PropensityTable:
     """
-    Class for the Protein Propensity Table data
+    Residue-pair propensity scores binned by Ramachandran (phi, psi) region.
+    Data is loaded from the bundled luthier.dat resource file.
     """
-    __slots__ = ('__ini', '__end', '__lines', '__data')
+    __slots__ = ('__data',)
 
-    def __init__(self):
-        """
-        Load the Propensity Table data
-        """
-
-        def find_block():
-            found = False
-            while self.__ini < self.__end:
-                if self.__lines[self.__ini][0] == '>':
-                    found = True
-                    break
-                self.__ini += 1
-            return found
-
-        def load_block():
-            tag = self.__lines[self.__ini].split()
-            self.__ini += 1
-            rows = []
-            while self.__lines[self.__ini][0] != 'U':
-                rows.append(self.__lines[self.__ini])
-                self.__ini += 1
-            rows.append(self.__lines[self.__ini])
-            return int(tag[1]), rows
-
+    def __init__(self) -> None:
+        """Load and parse the propensity table from the package data file."""
         ref = importlib_resources.files('melodia_py').joinpath('data/luthier.dat')
         with ref.open('rb') as fp:
-            lines = fp.readlines()
+            raw = fp.readlines()
 
-        # Remove newlines
-        for i, line in enumerate(lines):
-            lines[i] = lines[i].decode('utf-8')
-            if lines[i][-1] == '\n':
-                lines[i] = lines[i][:-1]
+        lines = [line.decode('utf-8').rstrip('\n') for line in raw]
+        # FIX [style]: Parsing extracted to a private static method so __init__
+        # has no inner functions closing over mutable state.
+        self.__data = PropensityTable._parse_blocks(lines)
 
-        # TODO: trim data after use
-        self.__ini = 0
-        self.__end = len(lines)
-        self.__lines = lines
-        self.__data = {}
+    @staticmethod
+    def _parse_blocks(lines: List[str]) -> Dict[int, Dict[str, int]]:
+        """Parse all > blocks from the luthier.dat line list."""
+        data: Dict[int, Dict[str, int]] = {}
+        i = 0
+        n = len(lines)
 
-        while find_block():
-            key, table = load_block()
-
-            dct = {}
-            head = table[0].split()
-            for i in range(1, len(table)):
-                row = table[i].split()
-                key1 = row[0]
-                for j in range(1, len(row)):
-                    key2 = head[j]
-                    key12 = f'{key1},{key2}'
-                    value = int(row[j])
-                    dct[key12] = value
-
-            self.__data[key] = dct
-
-    def get_score(self, target: str, residue: str, phi: float, psi: float) -> int:
-        """
-        Find anomalies in the protein's chain
-        :param target: Target residue 1 letter code
-        :type target: str
-        :param residue: Residue 1 letter code
-        :type residue: str
-        :param phi: phi angle (degrees)
-        :type phi: float
-        :param psi: psi angle (degrees)
-        :type psi: float
-        :return: Score
-        :rtype: int
-        """
-        max_phi = [0.0, 0.0, 0.0, -110.0, -110.0, 0.0, 140.0, 180.0, 180.0]
-        min_phi = [-180.0, -110.0, -110.0, -180.0, -180.0, -180.0, 20.0, 0.0, 0.0]
-        max_psi = [45.0, 180.0, -90.0, 180.0, -90.0, 100.0, 80.0, -40.0, 180.0]
-        min_psi = [-90.0, 100.0, -180.0, 100.0, -180.0, 45.0, -40.0, -180.0, 80.0]
-
-        tab_map = [0, 1, 1, 2, 2, 3, 4, 5, 5]
-
-        score = 0
-        for i in range(len(tab_map)):
-            if (min_phi[i] <= phi < max_phi[i]) and (min_psi[i] <= psi < max_psi[i]):
-                key = f'{target.upper()},{residue.upper()}'
-                score = self.__data[3][key]
+        while i < n:
+            # Seek next block header
+            while i < n and (not lines[i] or lines[i][0] != '>'):
+                i += 1
+            if i >= n:
                 break
 
-        return score
+            tag = lines[i].split()
+            block_key = int(tag[1])
+            i += 1
+
+            rows: List[str] = []
+            while i < n and lines[i] and lines[i][0] != 'U':
+                rows.append(lines[i])
+                i += 1
+            if i < n:
+                rows.append(lines[i])  # include the 'U...' terminator row
+                i += 1
+
+            head = rows[0].split()
+            dct: Dict[str, int] = {}
+            for row in rows[1:]:
+                parts = row.split()
+                row_key = parts[0]
+                for j, col_key in enumerate(head[1:], start=1):
+                    dct[f'{row_key},{col_key}'] = int(parts[j])
+            data[block_key] = dct
+
+        return data
+
+    def get_score(
+        self,
+        target: str,
+        residue: str,
+        phi: float,
+        psi: float,
+    ) -> Optional[int]:
+        """
+        Return the propensity score for a residue pair in a given
+        Ramachandran bin, or None if the (phi, psi) point falls outside
+        all defined bins.
+
+        :param target: Target residue 1-letter code
+        :param residue: Query residue 1-letter code
+        :param phi: Phi angle in degrees
+        :param psi: Psi angle in degrees
+        :return: Integer score, or None if no bin matches
+        """
+        # FIX [correctness]: Return None instead of 0 when no bin matches, so
+        # callers can distinguish a genuine score of 0 from a missed bin.
+        key = f'{target.upper()},{residue.upper()}'
+        for i, (phi_min, phi_max, psi_min, psi_max) in enumerate(_RAMA_BINS):
+            if phi_min <= phi < phi_max and psi_min <= psi < psi_max:
+                return self.__data[3][key]
+        return None
 
 
-def cluster_alignment(align: Bio.Align.MultipleSeqAlignment, threshold=0.7, long=False) -> None:
+# ---------------------------------------------------------------------------
+# Clustering
+# ---------------------------------------------------------------------------
+
+def cluster_alignment(
+    align: Bio.Align.MultipleSeqAlignment,
+    threshold: float = 0.7,
+    long: bool = False,
+) -> None:
     """
-         Cluster the alignments by structural similarity
-         :param align: Protein alignment
-         :type align: Bio.Align.MultipleSeqAlignment
-         :param threshold: similarity threshold
-         :type threshold: float
-         :param long: output only long cluster (length > 3)
-         :type long: bool
+    Cluster alignment positions by structural similarity in (curvature, torsion)
+    space and annotate each structure record with a 'cluster' letter_annotation.
+
+    :param align: Annotated MultipleSeqAlignment (mutated in place)
+    :param threshold: Agglomerative clustering distance threshold
+    :param long: If True, remove clusters shorter than 3 positions
     """
-    data = []
-    id2pos = {}
-    for position, record in enumerate(align):
-        if 'structure' in record.description:
-            id2pos[record.id] = position
-            for pair in zip(record.letter_annotations['curvature'], record.letter_annotations['torsion']):
-                data.append(list(pair))
-            record.letter_annotations['cluster'] = [0 for _ in record.seq]
+    # FIX [perf]: Pre-index structure records once instead of scanning align
+    # on every column iteration.
+    structure_records = {
+        record.id: record
+        for record in align
+        if 'structure' in record.description
+    }
+
+    all_pairs: List[List[float]] = []
+    for record in structure_records.values():
+        record.letter_annotations['cluster'] = [0] * len(record.seq)
+        for curv, tors in zip(
+            record.letter_annotations['curvature'],
+            record.letter_annotations['torsion'],
+        ):
+            all_pairs.append([curv, tors])
 
     scaler = StandardScaler()
-    scaler.fit(data)
+    scaler.fit(all_pairs)
 
     clustering = AgglomerativeClustering(distance_threshold=threshold, n_clusters=None)
+
     for i in range(align.get_alignment_length()):
-        xy = []
-        tags = []
-        for identity, position in id2pos.items():
-            record = align[position]
+        xy: List[List[float]] = []
+        tags: List[str] = []
+        for rec_id, record in structure_records.items():
             if record.seq[i] != '-':
-                xy.append([record.letter_annotations['curvature'][i], record.letter_annotations['torsion'][i]])
-                tags.append(identity)
+                xy.append([
+                    record.letter_annotations['curvature'][i],
+                    record.letter_annotations['torsion'][i],
+                ])
+                tags.append(rec_id)
 
         if len(xy) > 1:
-            xy = scaler.transform(xy)
-
-            clusters = clustering.fit_predict(xy)
-
-            map_of_clusters = {pair[0]: pair[1] for pair in zip(tags, clusters)}
-
-            for identity, position in id2pos.items():
-                record = align[position]
-                if identity in map_of_clusters:
-                    record.letter_annotations['cluster'][i] = map_of_clusters[identity]
-                    # print(id, record.letter_annotations['cluster'][i])
+            clusters = clustering.fit_predict(scaler.transform(xy))
+            cluster_map = dict(zip(tags, clusters))
+            for rec_id, record in structure_records.items():
+                if rec_id in cluster_map:
+                    record.letter_annotations['cluster'][i] = cluster_map[rec_id]
         else:
-            for identity, position in id2pos.items():
-                record = align[position]
+            for record in structure_records.values():
                 record.letter_annotations['cluster'][i] = 0
 
-    last_cluster = 0
-    for record in align:
-        if 'structure' not in record.description:
-            continue
-        max_cluster = max(record.letter_annotations['cluster'])
-        if max_cluster > last_cluster:
-            last_cluster = max_cluster
+    # Propagate consistent cluster labels across adjacent columns
+    last_cluster = max(
+        max(record.letter_annotations['cluster'])
+        for record in structure_records.values()
+    )
 
     for i in range(align.get_alignment_length() - 1):
         j = i + 1
-        left = {}
-        right = {}
+        left: Dict[int, set] = {}
+        right: Dict[int, set] = {}
+
         for k, record in enumerate(align):
             if 'structure' not in record.description:
                 continue
-
             ca = record.letter_annotations['cluster'][i]
             cb = record.letter_annotations['cluster'][j]
+            left.setdefault(ca, set()).add(k)
+            right.setdefault(cb, set()).add(k)
 
-            if ca not in left:
-                left[ca] = [k]
-            else:
-                left[ca].append(k)
-
-            if cb not in right:
-                right[cb] = [k]
-            else:
-                right[cb].append(k)
-
-        for key, value in left.items():
-            left[key] = set(value)
-
-        for key, value in right.items():
-            right[key] = set(value)
-
-        for right_key in right:
-            found_key = None
-            for left_key in left:
-                if right[right_key].symmetric_difference(left[left_key]) == set():
-                    found_key = left_key
-
+        for right_key, right_members in right.items():
+            found_key = next(
+                (lk for lk, lm in left.items() if not lm.symmetric_difference(right_members)),
+                None,
+            )
             if found_key is None:
                 last_cluster += 1
-                for k in right[right_key]:
-                    record = align[k]
-                    record.letter_annotations['cluster'][j] = last_cluster
+                for k in right_members:
+                    align[k].letter_annotations['cluster'][j] = last_cluster
             else:
-                for k in right[right_key]:
-                    record = align[k]
-                    record.letter_annotations['cluster'][j] = found_key
-
-    data, idx = get_idx(align)
+                for k in right_members:
+                    align[k].letter_annotations['cluster'][j] = found_key
 
     if long:
+        data, idx = get_idx(align)
         last_cluster = 0
         for j in idx:
             cluster, ini, end, size = data[j]
-            if size < 3:
-                for i in range(ini, end + 1):
-                    for record in align:
-                        if 'structure' not in record.description:
-                            continue
-                        if record.letter_annotations['cluster'][i] == cluster:
-                            record.letter_annotations['cluster'][i] = -1
-                data[j] = (-1, ini, end, size)
-            else:
-                # print(f'{ini}-{end} {cluster}->{p}')
-                for i in range(ini, end + 1):
-                    for record in align:
-                        if 'structure' not in record.description:
-                            continue
-                        if record.letter_annotations['cluster'][i] == cluster:
-                            record.letter_annotations['cluster'][i] = last_cluster
-
-                data[j] = (last_cluster, ini, end, size)
+            new_label = -1 if size < 3 else last_cluster
+            for i in range(ini, end + 1):
+                for record in align:
+                    if 'structure' not in record.description:
+                        continue
+                    if record.letter_annotations['cluster'][i] == cluster:
+                        record.letter_annotations['cluster'][i] = new_label
+            data[j] = (new_label, ini, end, size)
+            if size >= 3:
                 last_cluster += 1
-    return
 
 
-def save_pymol_script(align: Bio.Align.MultipleSeqAlignment, pml_file: str, palette='Dark2', colors=7) -> None:
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+
+def save_pymol_script(
+    align: Bio.Align.MultipleSeqAlignment,
+    pml_file: str,
+    palette: str = 'Dark2',
+    colors: int = 7,
+) -> None:
     """
-         Cluster the alignments by structural similarity
-         :param align: Protein alignment
-         :type align: Bio.Align.MultipleSeqAlignment
-         :param pml_file: Pymol script file name (pml)
-         :type pml_file: str
-         :param palette: colour palette
-         :type palette: str
-         :param colors: number of colours in the palette
-         :type colors: int
+    Write a PyMOL .pml script that loads, superimposes, and colours structures
+    by cluster assignment.
+
+    :param align: Clustered MultipleSeqAlignment
+    :param pml_file: Output filename (without .pml extension)
+    :param palette: Seaborn colour palette name
+    :param colors: Number of colours to draw from the palette
     """
     data, idx = get_idx(align)
-
-    tags = []
+    tags = [r.id for r in align if 'structure' in r.description]
     pal = sns.color_palette(palette, colors).as_hex()
+
     with open(f'{pml_file}.pml', 'w') as f:
         f.write('# Script generated by Melodia\n\n')
         f.write('# load structures\n')
-        for record in align:
-            if 'structure' not in record.description:
-                continue
-            tags.append(record.id)
-            f.write(f'load {record.id}.pdb\n')
-        f.write('\n')
-
-        f.write('# superimpose structures\n')
-        for i in range(1, len(tags)):
-            f.write(f'super {tags[i]}, {tags[0]}\n')
-        f.write('\n')
-
-        f.write('# non-conserved cluster color\n')
-        f.write(f'color gray40\n\n')
-        f.write('# cluster colors\n')
+        for tag in tags:
+            f.write(f'load {tag}.pdb\n')
+        f.write('\n# superimpose structures\n')
+        for tag in tags[1:]:
+            f.write(f'super {tag}, {tags[0]}\n')
+        f.write('\n# non-conserved cluster color\ncolor gray40\n\n# cluster colors\n')
         for i in idx:
-            positions = data[i]
-            cluster, ini, end, size = positions
+            cluster, ini, end, _ = data[i]
             if cluster >= 0:
                 for record in align:
                     if 'structure' not in record.description:
@@ -696,69 +830,83 @@ def save_pymol_script(align: Bio.Align.MultipleSeqAlignment, pml_file: str, pale
                         f.write(f'color {color}, {record.id} and resi {ini + 1}-{end + 1}\n')
                 f.write('\n')
         f.write('\ncenter\n')
-    return
 
 
-def get_idx(align: Bio.Align.MultipleSeqAlignment) -> Tuple[List[Tuple[Any, int, int, int]], List[SupportsIndex]]:
+def get_idx(
+    align: Bio.Align.MultipleSeqAlignment,
+) -> Tuple[List[Tuple[Any, int, int, int]], List[int]]:
     """
-    Internal function for clustering
-    :param align: Protein alignment
-    :return: Indexed clusters
+    Build a sorted index of (cluster, ini, end, size) blocks from a clustered
+    alignment.
+
+    :param align: Clustered MultipleSeqAlignment
+    :return: (data list, sorted index into data list)
     """
-    clusters = {}
-    for i, record in enumerate(align):
+    clusters: Dict[int, List[int]] = {}
+    for record in align:
         if 'structure' not in record.description:
             continue
         for j, cluster in enumerate(record.letter_annotations['cluster']):
-            if cluster not in clusters:
-                clusters[cluster] = [j]
-            else:
-                clusters[cluster].append(j)
-    data = []
-    block_init = []
-    for key, value in clusters.items():
-        data.append((key, min(value), max(value), max(value) - min(value) + 1))
-        block_init.append(min(value))
+            clusters.setdefault(cluster, []).append(j)
+
+    data: List[Tuple[Any, int, int, int]] = []
+    block_init: List[int] = []
+    for key, positions in clusters.items():
+        lo, hi = min(positions), max(positions)
+        data.append((key, lo, hi, hi - lo + 1))
+        block_init.append(lo)
+
     idx = sorted(range(len(block_init)), key=block_init.__getitem__)
     return data, idx
 
 
-def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str, palette='Dark2', colors=7) -> None:
+def save_align_to_ps(
+    align: Bio.Align.MultipleSeqAlignment,
+    ps_file: str,
+    palette: str = 'Dark2',
+    colors: int = 7,
+) -> None:
     """
-         Cluster the alignments by structural similarity
-         :param align: Protein alignment
-         :type align: Bio.Align.MultipleSeqAlignment
-         :param ps_file: post-script file name
-         :type ps_file: str
-         :param palette: colour palette
-         :type palette: str
-         :param colors: number of colours in the palette
-         :type colors: int
-    """
+    Write a PostScript visualisation of the clustered alignment.
 
+    :param align: Clustered MultipleSeqAlignment
+    :param ps_file: Output filename (without .ps extension)
+    :param palette: Seaborn colour palette name
+    :param colors: Number of colours to draw from the palette
+    """
     pal = sns.color_palette(palette, colors)
     rgb = [f'{c[0]:4.2f} {c[1]:4.2f} {c[2]:4.2f}' for c in pal]
-
     black = '0.00 0.00 0.00'
-    grey = '0.50 0.50 0.50'
+    grey  = '0.50 0.50 0.50'
+
+    length = align.get_alignment_length()
+    count  = len(align)
+    total  = length // 50
+    block  = count + 4
+    blocks_per_page = int(76 / block) + 1
 
     out_file = f'{ps_file}.ps'
-    with open(out_file, 'w') as ps:
-        ps.write('%%!PS-Adobe-3.0\n')
-        ps.write('%%%%Pages: 1\n')
-        ps.write('%%%%Creator: Melodia 1.0\n')
-        ps.write('%%%%CreationDate:\n')
-        ps.write('%%%%EndComments\n')
-        ps.write('%%%%Page: 1 1\n')
-        ps.write('/Courier-Regular findfont  16.0 scalefont  setfont\n')
-        ps.write('0.00 0.00 0.83 setrgbcolor\n')
-        ps.write(f'72.0 735.0 moveto ({ps_file}) show\n')
+    # FIX [perf]: Accumulate lines into a buffer and write once per logical
+    # section rather than calling f.write() for every single character.
+    buf: List[str] = []
 
-        length = align.get_alignment_length()
-        count = len(align)
-        total = int(length / 50)
-        block = count + 4
-        blocks_per_page = int(76 / block) + 1
+    def flush(f):
+        f.write(''.join(buf))
+        buf.clear()
+
+    with open(out_file, 'w') as ps:
+        buf += [
+            '%%!PS-Adobe-3.0\n',
+            '%%%%Pages: 1\n',
+            '%%%%Creator: Melodia 1.0\n',
+            '%%%%CreationDate:\n',
+            '%%%%EndComments\n',
+            '%%%%Page: 1 1\n',
+            '/Courier-Regular findfont  16.0 scalefont  setfont\n',
+            '0.00 0.00 0.83 setrgbcolor\n',
+            f'72.0 735.0 moveto ({ps_file}) show\n',
+        ]
+        flush(ps)
 
         page = 1
         line = 705.0
@@ -766,101 +914,90 @@ def save_align_to_ps(align: Bio.Align.MultipleSeqAlignment, ps_file: str, palett
         position = 10
 
         for j in range(total + 1):
-            ini = 0 + 50 * j
-            end = 49 + 50 * j
-
-            if end >= length:
-                end = length - 1
+            ini = 50 * j
+            end = min(ini + 49, length - 1)
 
             column = 203.0
-
-            ps.write('/Courier-Regular findfont  8.0 scalefont  setfont\n')
-            ps.write('0.00 0.00 0.83 setrgbcolor\n')
+            buf.append('/Courier-Regular findfont  8.0 scalefont  setfont\n')
+            buf.append('0.00 0.00 0.83 setrgbcolor\n')
 
             for k in range(1, 6):
-                if position < 100:
-                    ps.write('%5.1f %5.1f moveto (%d) show\n' % (column, line, position))
-                else:
-                    ps.write('%5.1f %5.1f moveto (%d) show\n' % (column - 2.0, line, position))
+                if position <= length:
+                    x = column if position < 100 else column - 2.0
+                    buf.append(f'{x:5.1f} {line:5.1f} moveto ({position}) show\n')
+                    position += 10
+                    column += 80.0
 
-                position += 10
-                column += 80.0
-
-                if position > length:
-                    break
-
-            i = 1
-            for record in align:
+            for seq_i, record in enumerate(align, start=1):
                 column = 52.0
                 line -= 10.0
-                ps.write('/Courier-Regular findfont  10.0 scalefont  setfont\n')
-                ps.write('0.00 0.00 0.00 setrgbcolor\n')
-                ps.write('%5.1f %5.1f moveto (%3d) show\n' % (column, line, i))
-
+                row_chars: List[str] = [
+                    '/Courier-Regular findfont  10.0 scalefont  setfont\n',
+                    '0.00 0.00 0.00 setrgbcolor\n',
+                    f'{column:5.1f} {line:5.1f} moveto ({seq_i:3d}) show\n',
+                ]
                 column += 20.0
-
-                ps.write('%5.1f %5.1f moveto (%s) show\n' % (column, line, record.id))
+                row_chars.append(f'{column:5.1f} {line:5.1f} moveto ({record.id}) show\n')
 
                 column = 131.1
                 bold = False
                 last_color = black
+                is_structure = 'structure' in record.description
+
                 for cur_res in range(ini, end + 1):
-                    if record.seq[cur_res] == '-':
+                    ch = record.seq[cur_res]
+                    if ch == '-':
                         if bold:
                             bold = False
-                            ps.write('/Courier-Regular findfont  10.0 scalefont  setfont\n')
+                            row_chars.append('/Courier-Regular findfont  10.0 scalefont  setfont\n')
                         if last_color != black:
                             last_color = black
-                            ps.write(f'{last_color} setrgbcolor\n')
-                    else:
-                        if 'structure' in record.description:
-                            k = record.letter_annotations['cluster'][cur_res]
-                            if k >= 0:
-                                c = k % colors
-                                if not bold:
-                                    bold = True
-                                    ps.write('/Courier-Bold findfont  10.0 scalefont  setfont\n')
-                                if last_color != rgb[c]:
-                                    last_color = rgb[c]
-                                    ps.write(f'{last_color} setrgbcolor\n')
-                            else:
-                                if bold:
-                                    bold = False
-                                    ps.write('/Courier-Regular findfont  10.0 scalefont  setfont\n')
-                                if last_color != grey:
-                                    last_color = grey
-                                    ps.write(f'{last_color} setrgbcolor\n')
+                            row_chars.append(f'{black} setrgbcolor\n')
+                        display_ch = ch
+                    elif is_structure:
+                        k = record.letter_annotations['cluster'][cur_res]
+                        if k >= 0:
+                            c = k % colors
+                            color = rgb[c]
+                            if not bold:
+                                bold = True
+                                row_chars.append('/Courier-Bold findfont  10.0 scalefont  setfont\n')
+                            if last_color != color:
+                                last_color = color
+                                row_chars.append(f'{color} setrgbcolor\n')
+                            display_ch = ch
                         else:
                             if bold:
                                 bold = False
-                                ps.write('/Courier-Regular findfont  10.0 scalefont  setfont\n')
-                            if last_color != black:
-                                last_color = black
-                                ps.write(f'{last_color} setrgbcolor\n')
-                    if 'structure' in record.description:
-                        if record.letter_annotations['cluster'][cur_res] < 0:
-                            ps.write(f'%5.1f %5.1f moveto (%c) show\n' % (column, line, record.seq[cur_res].lower()))
-                        else:
-                            ps.write(f'%5.1f %5.1f moveto (%c) show\n' % (column, line, record.seq[cur_res]))
+                                row_chars.append('/Courier-Regular findfont  10.0 scalefont  setfont\n')
+                            if last_color != grey:
+                                last_color = grey
+                                row_chars.append(f'{grey} setrgbcolor\n')
+                            display_ch = ch.lower()
                     else:
-                        ps.write(f'%5.1f %5.1f moveto (%c) show\n' % (column, line, record.seq[cur_res].lower()))
+                        if bold:
+                            bold = False
+                            row_chars.append('/Courier-Regular findfont  10.0 scalefont  setfont\n')
+                        if last_color != black:
+                            last_color = black
+                            row_chars.append(f'{black} setrgbcolor\n')
+                        display_ch = ch.lower()
+
+                    row_chars.append(f'{column:5.1f} {line:5.1f} moveto ({display_ch}) show\n')
                     column += 8.0
-                i += 1
+
+                buf.extend(row_chars)
 
             line -= 20.0
             blocks += 1
+            flush(ps)
 
             if blocks == blocks_per_page and j != total:
                 blocks = 0
                 line = 705.0
                 page += 1
-
-                ps.write('showpage\n')
-                ps.write(f'%%%%Page: {page} {page}\n')
+                ps.write(f'showpage\n%%%%Page: {page} {page}\n')
                 ps.write('/Courier-Regular findfont  16.0 scalefont  setfont\n')
-                ps.write('0.00 0.00 0.83 setrgbcolor\n')
-                ps.write(f'72.0 735.0 moveto (out_file) show\n')
+                ps.write(f'0.00 0.00 0.83 setrgbcolor\n72.0 735.0 moveto ({out_file}) show\n')
 
         ps.write('showpage\n')
-
-    return

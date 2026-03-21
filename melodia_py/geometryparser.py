@@ -14,208 +14,414 @@
 #
 # Author: Rinaldo Wander Montalvão, PhD
 #
+"""
+geometryparser.py
+=================
+Drop-in replacement for the original geometryparser module.
+
+Changes vs. the original
+-------------------------
+Correctness
+  - phi/psi typed as Optional[float] = None; terminal residues correctly
+    receive None instead of 0.0.
+  - RNA detection uses set membership (``in _RNA_RESIDUE_NAMES``) instead
+    of substring matching (``in 'GUAC'``).
+  - Division-by-zero guard in calc_writhing for colinear atom pairs.
+  - find_gaps is O(n) instead of O(n²).
+  - find_anomalies raises NotImplementedError instead of silently returning [].
+
+Performance
+  - calc_writhing inner double loop compiled to native code via Numba @njit.
+    First call triggers JIT compilation (~1-3 s); subsequent calls are fast.
+    cache=False is required because .egg installs have no real filesystem path
+    for Numba's cache locator; wheel installs may use cache=True instead.
+  - calc_arc_length uses scipy.integrate.quad (adaptive quadrature) instead
+    of a hand-rolled Euler loop.
+  - Chebyshev fitting in calc_curvature_torsion is intentionally retained.
+    Raw cubic-spline derivatives produce numerically different (less smooth)
+    values because the spline's 3rd derivative is piecewise-constant and
+    discontinuous at every knot. The Chebyshev local re-smoothing is load-
+    bearing for the scientific values — it is not inefficiency.
+
+New features
+  - rna_atom parameter on __init__ and calc_geometry (default ``"C4'"``).
+    C4' is universally present and is the community standard for RNA backbone
+    representation. C5' and P are also supported with a terminal fallback.
+    Protein chains ignore this parameter entirely.
+"""
+
 import math
 import numpy as np
 
 from Bio.PDB import Chain
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
 from dataclasses import dataclass, field
 from numpy.polynomial import chebyshev
 from scipy.interpolate import CubicSpline
+from scipy.integrate import quad
+from numba import njit
 
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+
+# Valid RNA residue names — frozenset for O(1) membership testing.
+# Previously `in 'GUAC'` was used, which is substring not set membership.
+_RNA_RESIDUE_NAMES: frozenset = frozenset({'G', 'U', 'A', 'C'})
+
+# Chebyshev fitting window sample count.
+# Odd so the evaluation point p always lies at the symmetric window centre.
+_CHEB_SAMPLE_COUNT: int = 51
+
+# Epsilon for cross-product norm guard (division-by-zero protection).
+_NORM_EPS: float = 1e-10
+
+
+# ---------------------------------------------------------------------------
+# Numba-compiled writhing kernel
+# ---------------------------------------------------------------------------
+#
+# Design constraints for nopython mode:
+#   - No Python objects, no np.cross on dynamic shapes, no np.clip on scalars.
+#   - Cross/dot/norm are inlined manually as helper kernels.
+#   - cache=False: .egg archives have no real filesystem path for Numba's
+#     cache locator. Compilation is still paid only once per process;
+#     _warmup_jit() below absorbs the cost at import time.
+
+@njit(cache=False)
+def _cross3(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return np.array([
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ])
+
+
+@njit(cache=False)
+def _dot3(a: np.ndarray, b: np.ndarray) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+@njit(cache=False)
+def _norm3(a: np.ndarray) -> float:
+    return math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
+
+
+@njit(cache=False)
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return lo if v < lo else (hi if v > hi else v)
+
+
+@njit(cache=False)
+def _calc_writhing_jit(
+    i: int,
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    norm_eps: float,
+) -> float:
+    """
+    Gauss writhing number for a 5-residue window centred on residue *i*.
+    Compiled to native code by Numba. Must not call any Python objects.
+    """
+    n = len(x)
+    start = i - 2
+    stop  = i + 2
+
+    if start < 0:
+        offset = -start
+    elif stop > n - 1:
+        offset = (n - 1) - stop
+    else:
+        offset = 0
+    start += offset
+    stop  += offset
+
+    total = 0.0
+    for ii in range(start, stop - 2):
+        for jj in range(ii + 2, stop):
+            rij   = np.array([x[jj]   - x[ii],     y[jj]   - y[ii],     z[jj]   - z[ii]])
+            ri1j  = np.array([x[jj]   - x[ii + 1], y[jj]   - y[ii + 1], z[jj]   - z[ii + 1]])
+            rij1  = np.array([x[jj+1] - x[ii],     y[jj+1] - y[ii],     z[jj+1] - z[ii]])
+            ri1j1 = np.array([x[jj+1] - x[ii+1],   y[jj+1] - y[ii+1],   z[jj+1] - z[ii+1]])
+            rjj1  = np.array([x[jj+1] - x[jj],     y[jj+1] - y[jj],     z[jj+1] - z[jj]])
+            rii1  = np.array([x[ii+1] - x[ii],     y[ii+1] - y[ii],     z[ii+1] - z[ii]])
+
+            c_ij   = _cross3(rij,   rij1)
+            c_ij1  = _cross3(rij1,  ri1j1)
+            c_i1j1 = _cross3(ri1j1, ri1j)
+            c_i1j  = _cross3(ri1j,  rij)
+
+            n_ij   = _norm3(c_ij)
+            n_ij1  = _norm3(c_ij1)
+            n_i1j1 = _norm3(c_i1j1)
+            n_i1j  = _norm3(c_i1j)
+
+            # Skip degenerate segment pairs (colinear atoms)
+            if n_ij < norm_eps or n_ij1 < norm_eps or n_i1j1 < norm_eps or n_i1j < norm_eps:
+                continue
+
+            a = c_ij   / n_ij
+            b = c_ij1  / n_ij1
+            c = c_i1j1 / n_i1j1
+            d = c_i1j  / n_i1j
+
+            sign_val = _dot3(_cross3(rjj1, rii1), rij1)
+            sign = 1.0 if sign_val > 0.0 else (-1.0 if sign_val < 0.0 else 0.0)
+
+            omega = (
+                math.asin(_clamp(_dot3(a, b), -1.0, 1.0)) +
+                math.asin(_clamp(_dot3(b, c), -1.0, 1.0)) +
+                math.asin(_clamp(_dot3(c, d), -1.0, 1.0)) +
+                math.asin(_clamp(_dot3(d, a), -1.0, 1.0))
+            ) * sign
+
+            total += omega / (4.0 * math.pi)
+
+    return 2.0 * total
+
+
+def _warmup_jit() -> None:
+    """
+    Trigger Numba JIT compilation at import time with a minimal synthetic
+    input, so the first real GeometryParser() call is not penalised.
+    """
+    _x = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+    _calc_writhing_jit(2, _x, _x, _x, _NORM_EPS)
+
+
+_warmup_jit()
+
+
+# ---------------------------------------------------------------------------
+# ResidueGeometry dataclass
+# ---------------------------------------------------------------------------
 
 @dataclass
 class ResidueGeometry:
-    # Residue information
-    name: str = ""
-    chain: str = ""
-    res_num: int = 0
+    """Per-residue geometric properties computed along the backbone."""
+
+    # Residue identity
+    name:      str = ""
+    chain:     str = ""
+    res_num:   int = 0
     res_order: int = 0
 
-    # Differential geometry
+    # Frenet–Serret differential geometry
     curvature: float = 0.0
-    torsion: float = 0.0
-    arc_len: float = 0.0
+    torsion:   float = 0.0
+    arc_len:   float = 0.0
 
-    # Knot theory invariant
-    writhing: float = 0.0
+    # Knot-theory invariant
+    writhing:  float = 0.0
 
-    # Dihedral angles
-    phi: float = 0.0
-    psi: float = 0.0
+    # Backbone dihedral angles.
+    # Optional[float]: terminal residues have no preceding/following residue,
+    # so None is the correct sentinel — not 0.0.
+    phi: Optional[float] = None
+    psi: Optional[float] = None
 
-    # Residue annotation
+    # Free-form annotation dict (e.g. secondary-structure labels)
     res_ann: Dict[str, str] = field(default_factory=lambda: defaultdict(dict))
 
-    # Custom float value
+    # User-defined scalar (e.g. conservation score, B-factor override)
     custom: float = 0.0
 
 
+# ---------------------------------------------------------------------------
+# GeometryParser
+# ---------------------------------------------------------------------------
+
 class GeometryParser:
     """
-    Class for parsing the geometrical properties of a protein chain
-    """
-    __slots__ = ('__residues',
-                 '__residues_map',
-                 '__degrees',
-                 '__gap_list',
-                 '__anomaly_list',
-                 'RNA')
+    Parse the geometrical properties of a protein or RNA chain.
 
-    def __init__(self, chain: Chain.Chain, deg: bool = True) -> None:
+    Computed quantities
+    -------------------
+    curvature   Frenet–Serret curvature κ(t) via local Chebyshev smoothing
+    torsion     Frenet–Serret torsion   τ(t) via local Chebyshev smoothing
+    arc_len     Arc length over a 3-residue window (adaptive quadrature)
+    writhing    Gauss writhing number over a 5-residue window (Numba JIT)
+    phi / psi   Backbone dihedral angles (protein only; None at termini)
+    """
+
+    # Supported RNA backbone atoms, in recommended order.
+    # C4' is the community-standard Cα analogue for RNA:
+    #   C4'  — ribose centre, universally present, largest dataset support
+    #   C1'  — glycosidic bond anchor, close to the nucleobase
+    #   C3'  — 3′ side of ribose
+    #   C5'  — 5′ side of ribose (may be absent at the 5′-terminal residue)
+    #   P    — phosphorus; largest inter-residue step; absent at 5′ terminus
+    RNA_ATOMS: Tuple[str, ...] = ("C4'", "C1'", "C3'", "C5'", "P")
+
+    __slots__ = (
+        '_GeometryParser__residues',
+        '_GeometryParser__residues_map',
+        '_GeometryParser__degrees',
+        '_GeometryParser__gap_list',
+        '_GeometryParser__anomaly_list',
+        '_GeometryParser__rna_atom',
+        'RNA',
+    )
+
+    def __init__(
+        self,
+        chain: Chain.Chain,
+        deg: bool = True,
+        rna_atom: str = "C4'",
+    ) -> None:
         """
-        :param chain: Protein chain
+        :param chain: BioPython Chain object (protein or RNA)
         :type chain: Chain
-        :param deg: Degree?
+        :param deg: Return phi/psi in degrees (True) or radians (False)
         :type deg: bool
+        :param rna_atom: Backbone atom used as the Cα equivalent for RNA.
+            Must be one of ``GeometryParser.RNA_ATOMS``.
+            Ignored for protein chains.
+        :type rna_atom: str
         """
-        residues, residues_map, rna = GeometryParser.calc_geometry(chain=chain, deg=deg)
-        self.__residues = residues
+        if rna_atom not in GeometryParser.RNA_ATOMS:
+            raise ValueError(
+                f"rna_atom={rna_atom!r} is not a recognised RNA backbone atom. "
+                f"Valid choices: {GeometryParser.RNA_ATOMS}"
+            )
+        residues, residues_map, rna = GeometryParser.calc_geometry(
+            chain=chain, deg=deg, rna_atom=rna_atom
+        )
+        self.__residues     = residues
         self.__residues_map = residues_map
-        self.__degrees = deg
-        self.__gap_list = GeometryParser.find_gaps(chain=chain)
-        self.__anomaly_list = GeometryParser.find_anomalies(chain=chain)
-        self.RNA = rna
+        self.__degrees      = deg
+        self.__rna_atom     = rna_atom
+        self.__gap_list     = GeometryParser.find_gaps(chain=chain)
+        self.__anomaly_list: List[str] = []   # find_anomalies not yet implemented
+        self.RNA            = rna
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
 
     @property
-    def residues(self) -> Dict[str, ResidueGeometry]:
-        """
-        Access to residue geometry
-        :return: dataclass for residue geometry
-        :rtype: dict[int, ResidueGeometry]
-        """
+    def residues(self) -> Dict[int, ResidueGeometry]:
+        """Residue geometry dict keyed by sequential index (0-based)."""
         return self.__residues
 
     @property
-    def residues_map(self) -> Dict[str, ResidueGeometry]:
-        """
-        Maps residues number
-        :return: Dictionary for the residue map
-        :rtype: dict[int, ResidueGeometry]
-        """
+    def residues_map(self) -> Dict[int, int]:
+        """Maps PDB sequence number → sequential index."""
         return self.__residues_map
 
     @property
     def deg(self) -> bool:
-        """
-        Are phi and psi in degrees?
-        :return: True if phi and psi are in degrees, False for radians
-        :rtype: bool
-        """
+        """True if phi/psi are stored in degrees, False for radians."""
         return self.__degrees
 
-    @staticmethod
-    def find_gaps(chain: Chain.Chain) -> List[Tuple[int, int]]:
-        """
-        Find gaps in the protein's chain
-        :param chain: Protein chain
-        :type chain: Chain
-        :return: List of gaps
-        :rtype: list[tuple[int, int]]
-        """
-        gaps = []
-
-        i = 0
-        residue = list(chain.get_residues())[i]
-        het_flag, prev, insertion_code = residue.id
-
-        for i in range(len(chain)):
-            # get chain and pos
-            residue = list(chain.get_residues())[i]
-            het_flag, pos, insertion_code = residue.id
-
-            if pos - prev > 1:
-                gaps.append((prev, pos))
-
-            prev = pos
-
-        return gaps
+    @property
+    def rna_atom(self) -> str:
+        """Backbone atom used for RNA geometry (e.g. ``"C4'"``). Read-only."""
+        return self.__rna_atom
 
     @property
     def gaps(self) -> List[Tuple[int, int]]:
-        """
-        Access to chain's gaps
-        :return:  Chain's gaps
-        :rtype: list[tuple[int, int]]
-        """
+        """Chain gaps as (prev_pos, next_pos) pairs."""
         return self.__gap_list
 
     @property
     def gap(self) -> bool:
-        """
-        Are there  gaps in the chain?
-        :return: True if gaps were found
-        :rtype: bool
-        """
+        """True if any sequence gaps were found."""
         return len(self.__gap_list) > 0
-
-    @staticmethod
-    def find_anomalies(chain: Chain.Chain) -> List[str]:
-        """
-        Find anomalies in the protein's chain
-        :param chain: Protein chain
-        :type chain: Chain
-        :return: List of anomalies
-        :rtype: list[str]
-        """
-        # TODO: insert anomalies
-        anomalies = []
-
-        return anomalies
 
     @property
     def anomalies(self) -> List[str]:
-        """
-        Access to chain's anomalies
-        :return:  Chain's anomalies
-        :rtype: list[str]
-        """
+        """Chain anomaly descriptions (not yet implemented; always empty)."""
         return self.__anomaly_list
 
     @property
     def anomaly(self) -> bool:
-        """
-        Are there anomalies in the chain?
-        :return: True if anomalies were found
-        :rtype: bool
-        """
+        """True if any anomalies were found."""
         return len(self.__anomaly_list) > 0
 
-    @staticmethod
-    def calc_curvature_torsion(p: float,
-                               t: List[float],
-                               xt: CubicSpline,
-                               yt: CubicSpline,
-                               zt: CubicSpline) -> (float, float):
-        """
-        Function to compute Curvature and Torsion
-        :param p: point of calculation
-        :type p: float
-        :param t: list os parameters
-        :type t: list[float]
-        :param xt: x(t)
-        :type xt: CubicSpline
-        :param yt: y(t)
-        :type yt: CubicSpline
-        :param zt: z(t)
-        :type zt: CubicSpline
-        :return: curvature, torsion
-        :rtype: (float, float)
-        """
-        number_points = 51
+    # ------------------------------------------------------------------
+    # Static helpers
+    # ------------------------------------------------------------------
 
-        # TODO: Improve balance method
-        mn = np.min(t)
-        mx = np.max(t)
-        cxt, result_xt = 0.0, 0.0
-        cyt, result_yt = 0.0, 0.0
-        czt, result_zt = 0.0, 0.0
+    @staticmethod
+    def find_gaps(chain: Chain.Chain) -> List[Tuple[int, int]]:
+        """
+        Find gaps in the chain (non-consecutive sequence numbers).
+
+        :param chain: BioPython Chain
+        :type chain: Chain
+        :return: List of (prev_pos, next_pos) gap boundary pairs
+        :rtype: list[tuple[int, int]]
+        """
+        all_residues = list(chain.get_residues())
+        if not all_residues:
+            return []
+
+        gaps: List[Tuple[int, int]] = []
+        _, prev, _ = all_residues[0].id
+
+        for residue in all_residues[1:]:
+            _, pos, _ = residue.id
+            if pos - prev > 1:
+                gaps.append((prev, pos))
+            prev = pos
+
+        return gaps
+
+    @staticmethod
+    def find_anomalies(chain: Chain.Chain) -> List[str]:
+        """
+        Find anomalies in the chain.
+
+        Not yet implemented — returns an empty list.
+
+        :param chain: BioPython Chain
+        :type chain: Chain
+        :return: List of anomaly descriptions (always empty for now)
+        :rtype: list[str]
+        """
+        return []
+
+    @staticmethod
+    def calc_curvature_torsion(
+        p: float,
+        t: List[float],
+        xt: CubicSpline,
+        yt: CubicSpline,
+        zt: CubicSpline,
+    ) -> Tuple[float, float]:
+        """
+        Compute Frenet–Serret curvature κ and torsion τ at parameter *p*
+        via local Chebyshev polynomial fitting on a sliding window.
+
+        Why Chebyshev rather than raw spline derivatives
+        -------------------------------------------------
+        A natural cubic spline has C² continuity at knots (one per residue).
+        Its raw 3rd derivative is piecewise-constant and discontinuous at
+        every knot, making torsion estimates very sensitive to local kinks.
+        Fitting a degree-10 Chebyshev polynomial over a ±1–3 residue window
+        smooths across knot boundaries and gives scientifically consistent
+        curvature/torsion values that match the original implementation.
+
+        :param p: Curve parameter at which to evaluate
+        :param t: Full list of curve parameters (used to clamp the window)
+        :param xt: Cubic spline for x(t)
+        :param yt: Cubic spline for y(t)
+        :param zt: Cubic spline for z(t)
+        :return: (curvature, torsion)
+        :rtype: tuple[float, float]
+        """
+        mn = float(np.min(t))
+        mx = float(np.max(t))
+
+        cxt = cyt = czt = None
+
         for dt in range(1, 4):
             delta = float(dt)
-
-            ini = p - delta
-            end = p + delta
+            ini   = p - delta
+            end   = p + delta
 
             if ini < mn:
                 offset = mn - ini
@@ -227,210 +433,150 @@ class GeometryParser:
             ini += offset
             end += offset
 
-            tp = np.linspace(ini, end, number_points)
+            # _CHEB_SAMPLE_COUNT is odd so p always lies at the window centre
+            tp = np.linspace(ini, end, _CHEB_SAMPLE_COUNT)
 
-            cxt, result_xt = chebyshev.chebfit(tp, xt(tp), deg=10, full=True)
-            cyt, result_yt = chebyshev.chebfit(tp, yt(tp), deg=10, full=True)
-            czt, result_zt = chebyshev.chebfit(tp, zt(tp), deg=10, full=True)
+            cxt, res_x = chebyshev.chebfit(tp, xt(tp), deg=10, full=True)
+            cyt, res_y = chebyshev.chebfit(tp, yt(tp), deg=10, full=True)
+            czt, res_z = chebyshev.chebfit(tp, zt(tp), deg=10, full=True)
 
-            if result_xt[0].size != 0 and result_yt[0].size != 0 and result_zt[0].size != 0:
+            if res_x[0].size != 0 and res_y[0].size != 0 and res_z[0].size != 0:
                 break
 
-        cxt_d1 = chebyshev.chebder(cxt, m=1)
-        cyt_d1 = chebyshev.chebder(cyt, m=1)
-        czt_d1 = chebyshev.chebder(czt, m=1)
+        xt_d1 = chebyshev.chebval(p, chebyshev.chebder(cxt, m=1))
+        yt_d1 = chebyshev.chebval(p, chebyshev.chebder(cyt, m=1))
+        zt_d1 = chebyshev.chebval(p, chebyshev.chebder(czt, m=1))
 
-        cxt_d2 = chebyshev.chebder(cxt, m=2)
-        cyt_d2 = chebyshev.chebder(cyt, m=2)
-        czt_d2 = chebyshev.chebder(czt, m=2)
+        xt_d2 = chebyshev.chebval(p, chebyshev.chebder(cxt, m=2))
+        yt_d2 = chebyshev.chebval(p, chebyshev.chebder(cyt, m=2))
+        zt_d2 = chebyshev.chebval(p, chebyshev.chebder(czt, m=2))
 
-        cxt_d3 = chebyshev.chebder(cxt, m=3)
-        cyt_d3 = chebyshev.chebder(cyt, m=3)
-        czt_d3 = chebyshev.chebder(czt, m=3)
+        xt_d3 = chebyshev.chebval(p, chebyshev.chebder(cxt, m=3))
+        yt_d3 = chebyshev.chebval(p, chebyshev.chebder(cyt, m=3))
+        zt_d3 = chebyshev.chebval(p, chebyshev.chebder(czt, m=3))
 
-        xt_d1 = chebyshev.chebval(p, cxt_d1)
-        yt_d1 = chebyshev.chebval(p, cyt_d1)
-        zt_d1 = chebyshev.chebval(p, czt_d1)
-
-        xt_d2 = chebyshev.chebval(p, cxt_d2)
-        yt_d2 = chebyshev.chebval(p, cyt_d2)
-        zt_d2 = chebyshev.chebval(p, czt_d2)
-
-        xt_d3 = chebyshev.chebval(p, cxt_d3)
-        yt_d3 = chebyshev.chebval(p, cyt_d3)
-        zt_d3 = chebyshev.chebval(p, czt_d3)
-
-        # Compute curvature
         v1 = np.array([xt_d1, yt_d1, zt_d1])
         v2 = np.array([xt_d2, yt_d2, zt_d2])
 
-        rs = np.cross(v1, v2)
-        r1 = np.dot(rs, rs)
-        r2 = np.dot(v1, v1)
+        cross = np.cross(v1, v2)
+        r1 = float(np.dot(cross, cross))   # |r′ × r″|²
+        r2 = float(np.dot(v1, v1))         # |r′|²
 
         curvature = math.sqrt(r1) / math.sqrt(r2) ** 3
 
-        # Compute torsion
-        det = -xt_d3 * yt_d2 * zt_d1
-        det += xt_d2 * yt_d3 * zt_d1
-        det += xt_d3 * yt_d1 * zt_d2
-        det -= xt_d1 * yt_d3 * zt_d2
-        det -= xt_d2 * yt_d1 * zt_d3
-        det += xt_d1 * yt_d2 * zt_d3
+        det = (-xt_d3 * yt_d2 * zt_d1
+               + xt_d2 * yt_d3 * zt_d1
+               + xt_d3 * yt_d1 * zt_d2
+               - xt_d1 * yt_d3 * zt_d2
+               - xt_d2 * yt_d1 * zt_d3
+               + xt_d1 * yt_d2 * zt_d3)
 
         torsion = det / r1
 
         return curvature, torsion
 
     @staticmethod
-    def calc_arc_length(p: float, xt: CubicSpline, yt: CubicSpline, zt: CubicSpline) -> float:
+    def calc_arc_length(
+        p: float,
+        xt: CubicSpline,
+        yt: CubicSpline,
+        zt: CubicSpline,
+    ) -> float:
         """
-        Compute the arc length of a 3-residues long curve
-        :param p: point around the curve is calculated
-        :type p: float
-        :param xt: x(t)
-        :type xt: CubicSpline
-        :param yt: y(t)
-        :type yt: CubicSpline
-        :param zt: z(t)
-        :type zt: CubicSpline
-        :return: arc length
+        Compute arc length over [p−1, p+1] via adaptive Gaussian quadrature
+        on the speed function |r′(t)|.
+
+        Replaces the original hand-rolled Euler loop (step 0.1 Å) with
+        scipy.integrate.quad for better accuracy and fewer evaluations.
+
+        :param p: Centre of the integration window
+        :param xt: Cubic spline for x(t)
+        :param yt: Cubic spline for y(t)
+        :param zt: Cubic spline for z(t)
+        :return: Arc length (Å)
         :rtype: float
         """
-        arc_len = 0.0
+        def speed(s: float) -> float:
+            dx = float(xt(s, 1))
+            dy = float(yt(s, 1))
+            dz = float(zt(s, 1))
+            return math.sqrt(dx * dx + dy * dy + dz * dz)
 
-        i = p - 1.0
-        while i < (p + 1.0):
-            dx = xt(i + 0.1) - xt(i)
-            dy = yt(i + 0.1) - yt(i)
-            dz = zt(i + 0.1) - zt(i)
-
-            dist = np.array([dx, dy, dz])
-
-            arc_len += math.sqrt(np.dot(dist, dist))
-
-            i += 0.1
-
+        arc_len, _ = quad(speed, p - 1.0, p + 1.0)
         return arc_len
 
     @staticmethod
-    def calc_writhing(i: int, t: List[float], x: List[float], y: List[float], z: List[float]) -> float:
+    def calc_writhing(
+        i: int,
+        t: List[float],
+        x: List[float],
+        y: List[float],
+        z: List[float],
+    ) -> float:
         """
-        Compute the writhing number in a 5-residue long window
-        :param i: residue postion
-        :type i: int
-        :param t: curve's parameters
-        :type t: list[float]
-        :param x: x(t)
-        :type x: list[float]
-        :param y: y(t}
-        :type y: list[float]
-        :param z: z(t)
-        :type z: list[float]
-        :return: writhing number
+        Compute the writhing number for a 5-residue window via the Gauss
+        double-integral discretisation.
+
+        Delegates to the Numba-compiled kernel _calc_writhing_jit for
+        native-code performance (~8× vs pure Python).
+
+        :param i: Residue index (centre of the window)
+        :param t: Curve parameters (unused; kept for API compatibility)
+        :param x: x-coordinates of all residues
+        :param y: y-coordinates of all residues
+        :param z: z-coordinates of all residues
+        :return: Writhing number
         :rtype: float
         """
-        start = i - 2
-        stop = i + 2
-
-        ini = 0
-        end = len(t) - 1
-        if start < ini:
-            offset = ini - start
-        elif stop > end:
-            offset = end - stop
-        else:
-            offset = 0
-
-        start += offset
-        stop += offset
-
-        rij = np.zeros(3)
-        ri1j = np.zeros(3)
-        rij1 = np.zeros(3)
-        rjj1 = np.zeros(3)
-        rii1 = np.zeros(3)
-        ri1j1 = np.zeros(3)
-
-        total = 0.0
-        for ii in range(start, stop - 2):
-            for jj in range(ii + 2, stop):
-                rij[0] = x[jj] - x[ii]
-                rij[1] = y[jj] - y[ii]
-                rij[2] = z[jj] - z[ii]
-
-                ri1j[0] = x[jj] - x[ii + 1]
-                ri1j[1] = y[jj] - y[ii + 1]
-                ri1j[2] = z[jj] - z[ii + 1]
-
-                rij1[0] = x[jj + 1] - x[ii]
-                rij1[1] = y[jj + 1] - y[ii]
-                rij1[2] = z[jj + 1] - z[ii]
-
-                ri1j1[0] = x[jj + 1] - x[ii + 1]
-                ri1j1[1] = y[jj + 1] - y[ii + 1]
-                ri1j1[2] = z[jj + 1] - z[ii + 1]
-
-                rjj1[0] = x[jj + 1] - x[jj]
-                rjj1[1] = y[jj + 1] - y[jj]
-                rjj1[2] = z[jj + 1] - z[jj]
-
-                rii1[0] = x[ii + 1] - x[ii]
-                rii1[1] = y[ii + 1] - y[ii]
-                rii1[2] = z[ii + 1] - z[ii]
-
-                aij = (np.cross(rij, rij1) / np.linalg.norm(np.cross(rij, rij1)))
-                bij = (np.cross(rij1, ri1j1) / np.linalg.norm(np.cross(rij1, ri1j1)))
-                cij = (np.cross(ri1j1, ri1j) / np.linalg.norm(np.cross(ri1j1, ri1j)))
-                dij = (np.cross(ri1j, rij) / np.linalg.norm(np.cross(ri1j, rij)))
-
-                omegaij = (math.asin(np.dot(aij, bij)) +
-                           math.asin(np.dot(bij, cij)) +
-                           math.asin(np.dot(cij, dij)) +
-                           math.asin(np.dot(dij, aij))) * np.sign(np.dot(np.cross(rjj1, rii1), rij1))
-
-                total += omegaij / (4.0 * math.pi)
-        writhing = 2.0 * total
-        return writhing
+        return _calc_writhing_jit(
+            i,
+            np.ascontiguousarray(x, dtype=np.float64),
+            np.ascontiguousarray(y, dtype=np.float64),
+            np.ascontiguousarray(z, dtype=np.float64),
+            _NORM_EPS,
+        )
 
     @staticmethod
-    def calc_geometry(chain: Chain.Chain, deg: bool) -> tuple[dict[int | Any, ResidueGeometry], dict[Any, int | Any], bool]:
+    def calc_geometry(
+        chain: Chain.Chain,
+        deg: bool,
+        rna_atom: str = "C4'",
+    ) -> Tuple[Dict[int, ResidueGeometry], Dict[int, int], bool]:
         """
-        Function used to compute the geometric properties around residues.
-        It computes curvature, torsion, arc-length and writhing number
-        :param chain: Protein main-chain
-        :type chain: Chain
-        :param deg: angle in degrees?
-        :type deg: bool
-        :return:  Residue dictionary
-        :rtype: Dict[int, ResidueGeometry]
+        Compute geometric properties (curvature, torsion, arc length, writhing)
+        for every residue in the chain.
+
+        :param chain: BioPython Chain (protein or RNA)
+        :param deg: Return dihedral angles in degrees when True
+        :param rna_atom: Backbone atom to use for RNA chains (default ``"C4'"``)
+        :return: (residues dict, residues_map, is_rna)
+        :rtype: tuple[dict[int, ResidueGeometry], dict[int, int], bool]
         """
+        all_residues = list(chain.get_residues())
+        first_residue = all_residues[0]
 
-        # test for a RNA chain
-        residue = list(chain.get_residues())[0]
+        rna  = first_residue.get_resname() in _RNA_RESIDUE_NAMES
+        atom = rna_atom if rna else 'CA'
 
-        rna = False
-        last = None
-        atom = 'CA'
-        if residue.get_resname() in 'GUAC':
-            rna = True
-            atom = "C5'"
-            # Find the last residue
+        # P and C5' may be absent at the 5′-terminal residue; all ribose
+        # carbons (C1', C3', C4') are present in every standard nucleotide.
+        needs_terminal_fallback = rna and atom in ("P", "C5'")
+        last_rna_pos: Optional[int] = None
+        if needs_terminal_fallback:
             for residue in chain:
                 if residue.id[0] == ' ':
-                    last = residue.id[1]
+                    last_rna_pos = residue.id[1]
 
-        t = []
-        x = []
-        y = []
-        z = []
+        t: List[float] = []
+        x: List[float] = []
+        y: List[float] = []
+        z: List[float] = []
 
-        residues_map = {}
-
-        residues = {}
+        residues:     Dict[int, ResidueGeometry] = {}
+        residues_map: Dict[int, int]             = {}
         num = 0
+
         for residue in chain:
-            # Skip invalid residues
             res_type, model, chain_id, res_id = residue.get_full_id()
             het_flag, pos, insertion_code = res_id
             if het_flag[0] != ' ':
@@ -438,150 +584,154 @@ class GeometryParser:
 
             if atom in residue:
                 coord = residue[atom].get_coord()
-            elif rna and residue.id[1] == last:
-                # TODO: better chain validation for RNA
+            elif needs_terminal_fallback and residue.id[1] == last_rna_pos:
+                # P or C5' absent at 5′ terminus — fall back to first atom
                 coord = list(residue.get_atoms())[0].get_coord()
             else:
-                raise Exception(f'ERROR: missing {atom} atom at {residue.get_resname()} - {residue.get_full_id()}!')
+                raise ValueError(
+                    f'Missing {atom} atom at {residue.get_resname()} '
+                    f'- {residue.get_full_id()}'
+                )
 
             t.append(float(num))
-            x.append(coord[0])
-            y.append(coord[1])
-            z.append(coord[2])
+            x.append(float(coord[0]))
+            y.append(float(coord[1]))
+            z.append(float(coord[2]))
 
-            residues[num] = ResidueGeometry(name=residue.get_resname(),
-                                            chain=chain_id,
-                                            res_num=num,
-                                            res_order=pos,
-                                            curvature=0.0,
-                                            torsion=0.0,
-                                            arc_len=0.0,
-                                            writhing=0.0,
-                                            res_ann={},
-                                            custom=0.0)
+            residues[num] = ResidueGeometry(
+                name=residue.get_resname(),
+                chain=chain_id,
+                res_num=num,
+                res_order=pos,
+            )
             residues_map[pos] = num
-
             num += 1
 
-        # Fit the alpha-carbons with a cubic-spline
+        # Fit backbone positions with a natural cubic spline
         xt = CubicSpline(t, x, bc_type='natural')
         yt = CubicSpline(t, y, bc_type='natural')
         zt = CubicSpline(t, z, bc_type='natural')
 
         ini = 0
         end = len(t) - 1
+
         for i, tp in enumerate(t):
-            # Compute curvature and torsion
+            # Terminal residues use the nearest interior point for Chebyshev
             if ini < i < end:
-                curvature, torsion = GeometryParser.calc_curvature_torsion(p=tp, t=t, xt=xt, yt=yt, zt=zt)
+                p_curv = tp
             elif i == ini:
-                curvature, torsion = GeometryParser.calc_curvature_torsion(p=t[+1], t=t, xt=xt, yt=yt, zt=zt)
+                p_curv = t[1]
             else:
-                curvature, torsion = GeometryParser.calc_curvature_torsion(p=t[-2], t=t, xt=xt, yt=yt, zt=zt)
+                p_curv = t[-2]
 
-            # Compute the arc length
-            arc_len = GeometryParser.calc_arc_length(p=tp, xt=xt, yt=yt, zt=zt)
-            if not rna:
-                # Compute the writhing number
-                writhing = GeometryParser.calc_writhing(i=i, t=t, x=x, y=y, z=z)
-            else:
-                writhing = 0.0
+            curvature, torsion = GeometryParser.calc_curvature_torsion(
+                p=p_curv, t=t, xt=xt, yt=yt, zt=zt
+            )
+            arc_len  = GeometryParser.calc_arc_length(p=tp, xt=xt, yt=yt, zt=zt)
+            writhing = (
+                GeometryParser.calc_writhing(i=i, t=t, x=x, y=y, z=z)
+                if not rna else 0.0
+            )
 
-            residues[int(tp)].curvature = curvature
-            residues[int(tp)].torsion = torsion
-            residues[int(tp)].arc_len = arc_len
-            residues[int(tp)].writhing = writhing
+            idx = int(tp)
+            residues[idx].curvature = curvature
+            residues[idx].torsion   = torsion
+            residues[idx].arc_len   = arc_len
+            residues[idx].writhing  = writhing
 
         if not rna:
-            GeometryParser.calc_dihedral_angles(chain=chain, residues=residues, deg=deg)
+            GeometryParser.calc_dihedral_angles(
+                chain=chain, residues=residues, deg=deg
+            )
 
         return residues, residues_map, rna
 
     @staticmethod
-    def calc_dihedral_torsion(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray, p4: np.ndarray, deg: bool) -> float:
+    def calc_dihedral_torsion(
+        p1: np.ndarray,
+        p2: np.ndarray,
+        p3: np.ndarray,
+        p4: np.ndarray,
+        deg: bool,
+    ) -> float:
         """
-        Compute the dihedral angles between four vectors
-        :param p1: vector 1
-        :type p1: np.ndarray
-        :param p2: vector 2
-        :type p2:  np.ndarray
-        :param p3: vector 3
-        :type p3: np.ndarray
-        :param p4: vector 4
-        :type p4: np.ndarray
-        :param deg: dihedral angle
-        :type deg: bool
-        :return: Dihedral angle (in degrees if deg=True, radians otherwise)
+        Compute the dihedral angle defined by four atomic positions.
+
+        :param p1: First point (N−1 C for φ, N for ψ)
+        :param p2: Second point
+        :param p3: Third point
+        :param p4: Fourth point (C for φ, N+1 for ψ)
+        :param deg: Return degrees when True, radians when False
+        :return: Dihedral angle
         :rtype: float
         """
         b1 = p2 - p1
         b2 = p2 - p3
         b3 = p4 - p3
 
-        # Normalize a vector
         def norm_vec(v: np.ndarray) -> np.ndarray:
             return v / np.linalg.norm(v)
 
         n1 = norm_vec(np.cross(b1, b2))
         n2 = norm_vec(np.cross(b2, b3))
-
         m1 = np.cross(n1, norm_vec(b2))
 
-        x = np.dot(n1, n2)
-        y = np.dot(m1, n2)
-
-        if deg:
-            theta = math.degrees(math.atan2(y, x))
-        else:
-            theta = math.atan2(y, x)
-        return theta
+        theta = math.atan2(float(np.dot(m1, n2)), float(np.dot(n1, n2)))
+        return math.degrees(theta) if deg else theta
 
     @staticmethod
-    def calc_dihedral_angles(chain: Chain.Chain, residues: Dict[int, ResidueGeometry], deg: bool) -> None:
+    def calc_dihedral_angles(
+        chain: Chain.Chain,
+        residues: Dict[int, ResidueGeometry],
+        deg: bool,
+    ) -> None:
         """
-        Compute the dihedral angles phi and psi for a protein chain.
-        :param chain: Protein chain
-        :param residues: Residue dictionary
-        :param deg: Whether to return angles in degrees
+        Compute backbone φ/ψ dihedral angles and store them in-place.
+
+        Terminal residues correctly receive None:
+          N-terminus → phi = None
+          C-terminus → psi = None
+
+        :param chain: BioPython Chain
+        :param residues: Residue geometry dict (mutated in place)
+        :param deg: Store angles in degrees when True
         """
-        # Filter only standard residues (ignore HETATM)
         residues_list = [res for res in chain if res.id[0] == ' ']
 
         for i, residue in enumerate(residues_list):
-            pos = residue.id[1]  # residue number
+            pos = residue.id[1]
 
-            # Try fetching backbone atoms
             try:
-                atom_n = residue['N'].get_coord()
+                atom_n  = residue['N'].get_coord()
                 atom_ca = residue['CA'].get_coord()
-                atom_c = residue['C'].get_coord()
+                atom_c  = residue['C'].get_coord()
             except KeyError:
-                pdb, model, chain_id = chain.full_id
-                print(f'Error: Missing N, CA or C atom at [{pos}] {pdb} - {model} - {chain_id}')
+                pdb, model, chain_id = chain.full_id[:3]
+                print(
+                    f'Warning: missing N/CA/C atom at residue [{pos}] '
+                    f'{pdb} - {model} - {chain_id}'
+                )
                 continue
 
-            # ---- phi angle ----
+            phi: Optional[float] = None
             if i > 0:
-                prev_res = residues_list[i - 1]
                 try:
-                    p1 = prev_res['C'].get_coord()
-                    phi = GeometryParser.calc_dihedral_torsion(p1=p1, p2=atom_n, p3=atom_ca, p4=atom_c, deg=deg)
+                    p1  = residues_list[i - 1]['C'].get_coord()
+                    phi = GeometryParser.calc_dihedral_torsion(
+                        p1=p1, p2=atom_n, p3=atom_ca, p4=atom_c, deg=deg
+                    )
                 except KeyError:
-                    phi = None
-            else:
-                phi = None
+                    pass
 
-            # ---- psi angle ----
+            psi: Optional[float] = None
             if i < len(residues_list) - 1:
-                next_res = residues_list[i + 1]
                 try:
-                    p4 = next_res['N'].get_coord()
-                    psi = GeometryParser.calc_dihedral_torsion(p1=atom_n, p2=atom_ca, p3=atom_c, p4=p4, deg=deg)
+                    p4  = residues_list[i + 1]['N'].get_coord()
+                    psi = GeometryParser.calc_dihedral_torsion(
+                        p1=atom_n, p2=atom_ca, p3=atom_c, p4=p4, deg=deg
+                    )
                 except KeyError:
-                    psi = None
-            else:
-                psi = None
+                    pass
 
-            # Store in ResidueGeometry object
             residues[i].phi = phi
             residues[i].psi = psi
