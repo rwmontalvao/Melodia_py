@@ -343,24 +343,150 @@ def proc_chains(
 
 
 
-def geometry_dict_from_structure(structure: Structure) -> Dict[str, GeometryParser]:
+def _compute_model_gp(task: dict, deg: bool) -> List[Tuple[str, dict]]:
+    """
+    Worker: compute geometry for all chains of one model and return
+    (key, residues_dict) pairs that can be used to reconstruct results.
+    Receives only plain dicts — no BioPython objects.
+    """
+    import numpy as np
+    from scipy.interpolate import CubicSpline
+    from melodia_py.geometryparser import (
+        GeometryParser, ResidueGeometry, _NORM_EPS, _calc_writhing_jit,
+    )
+
+    model_id = task['model_id']
+    results  = []
+
+    for chain in task['chains']:
+        chain_id     = chain['chain_id']
+        rna          = chain['rna']
+        coords       = chain['coords']
+        residue_meta = chain['residue_meta']
+        backbone     = chain['backbone']
+
+        n_res = len(coords)
+        t = list(range(n_res))
+        x = [c[0] for c in coords]
+        y = [c[1] for c in coords]
+        z = [c[2] for c in coords]
+
+        xt = CubicSpline(t, x, bc_type='natural')
+        yt = CubicSpline(t, y, bc_type='natural')
+        zt = CubicSpline(t, z, bc_type='natural')
+
+        xa = np.ascontiguousarray(x, dtype=np.float64)
+        ya = np.ascontiguousarray(y, dtype=np.float64)
+        za = np.ascontiguousarray(z, dtype=np.float64)
+
+        ini, end = 0, n_res - 1
+        residues:     dict = {}
+        residues_map: dict = {}
+
+        for i, (resname, pos) in enumerate(residue_meta):
+            p_curv = float(t[1]) if i == ini else (float(t[-2]) if i == end else float(i))
+
+            curvature, torsion = GeometryParser.calc_curvature_torsion(
+                p=p_curv, t=t, xt=xt, yt=yt, zt=zt
+            )
+            arc_len  = GeometryParser.calc_arc_length(p=float(i), xt=xt, yt=yt, zt=zt)
+            writhing = (
+                float(_calc_writhing_jit(i, xa, ya, za, _NORM_EPS))
+                if not rna else 0.0
+            )
+
+            rg = ResidueGeometry(
+                name=resname,
+                chain=chain_id,
+                res_num=i,
+                res_order=pos,
+                curvature=curvature,
+                torsion=torsion,
+                arc_len=arc_len,
+                writhing=writhing,
+            )
+
+            if not rna:
+                bb = backbone[i]
+                if bb is not None:
+                    n_coord  = np.array(bb[0])
+                    ca_coord = np.array(bb[1])
+                    c_coord  = np.array(bb[2])
+                    if i > 0 and backbone[i - 1] is not None:
+                        prev_c = np.array(backbone[i - 1][2])
+                        rg.phi = GeometryParser.calc_dihedral_torsion(
+                            p1=prev_c, p2=n_coord, p3=ca_coord, p4=c_coord, deg=deg
+                        )
+                    if i < n_res - 1 and backbone[i + 1] is not None:
+                        next_n = np.array(backbone[i + 1][0])
+                        rg.psi = GeometryParser.calc_dihedral_torsion(
+                            p1=n_coord, p2=ca_coord, p3=c_coord, p4=next_n, deg=deg
+                        )
+
+            residues[i]   = rg
+            residues_map[pos] = i
+
+        key = f'{model_id}:{chain_id}'
+        results.append((key, residues, residues_map, rna))
+
+    return results
+
+
+def geometry_dict_from_structure(
+    structure: Structure,
+    n_jobs: int = 1,
+    rna_atom: str = "C4'",
+    deg: bool = True,
+) -> Dict[str, GeometryParser]:
     """
     Build a mapping of 'model_id:chain_id' → GeometryParser for all chains
     that contain at least one standard residue.
 
+    For multi-model structures (NMR ensembles, MD trajectories) set
+    ``n_jobs=-1`` to parallelise across models.
+
     :param structure: BioPython PDB Structure
-    :return: Dict of GeometryParser objects keyed by 'model:chain'
+    :param n_jobs: Number of parallel worker processes (default 1)
+    :param rna_atom: Backbone atom for RNA chains (default ``"C4'"``)
+    :param deg: Return phi/psi in degrees (True) or radians (False)
+    :return: Dict of GeometryParser objects keyed by 'model_id:chain_id'
     """
-    chains: Dict[str, GeometryParser] = {}
+    pdb_code = structure.id.upper()
+
+    # Extract coordinate data in the parent process
+    tasks = []
     for model in structure:
-        for chain in model:
-            has_standard = any(
-                res.id[0] == ' ' for res in chain.get_residues()
-            )
-            if has_standard:
-                key = f'{model.id}:{chain.id}'
-                chains[key] = GeometryParser(chain)
+        task = _extract_model_data(model, pdb_code, rna_atom)
+        if task is not None:
+            tasks.append(task)
+
+    if not tasks:
+        return {}
+
+    # Dispatch to workers — one task per model
+    nested: List[List[tuple]] = Parallel(n_jobs=n_jobs)(
+        delayed(_compute_model_gp)(task, deg)
+        for task in tasks
+    )
+
+    # Reconstruct GeometryParser objects from the worker results.
+    # We bypass __init__ and set internals directly since we already
+    # have all computed data — no need to reparse the BioPython chain.
+    chains: Dict[str, GeometryParser] = {}
+    for model_results in nested:
+        for key, residues, residues_map, rna in model_results:
+            gp = object.__new__(GeometryParser)
+            object.__setattr__(gp, '_GeometryParser__residues',     residues)
+            object.__setattr__(gp, '_GeometryParser__residues_map', residues_map)
+            object.__setattr__(gp, '_GeometryParser__degrees',      deg)
+            object.__setattr__(gp, '_GeometryParser__gap_list',     [])
+            object.__setattr__(gp, '_GeometryParser__anomaly_list', [])
+            object.__setattr__(gp, '_GeometryParser__rna_atom',     rna_atom)
+            object.__setattr__(gp, 'RNA',                           rna)
+            chains[key] = gp
+
     return chains
+
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +497,8 @@ def bfactor_from_geo(
     structure: Structure,
     attribute: str,
     geo: Optional[Dict[str, GeometryParser]] = None,
+    n_jobs: int = 1,
+    rna_atom: str = "C4'",
 ) -> None:
     """
     Set every atom's B-factor to a geometric property value.
@@ -378,9 +506,11 @@ def bfactor_from_geo(
     :param structure: BioPython PDB Structure (mutated in place)
     :param attribute: One of 'curvature', 'torsion', 'custom'
     :param geo: Pre-computed geometry dict; computed from structure if None
+    :param n_jobs: Number of parallel workers used if geo must be computed
+    :param rna_atom: Backbone atom for RNA chains if geo must be computed
     """
     if geo is None:
-        geo = geometry_dict_from_structure(structure)
+        geo = geometry_dict_from_structure(structure, n_jobs=n_jobs, rna_atom=rna_atom)
 
     def _get_val(gp: GeometryParser, res_idx: int) -> float:
         res = gp.residues[res_idx]
