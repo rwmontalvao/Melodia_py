@@ -1,6 +1,6 @@
 ![Melodia](Melodia_logo.png)
 # Melodia_py
-## Protein Structure Analysis
+## Protein & RNA/DNA/XNA Structure Analysis
 
 **Melodia_py** is a Python library for computing Differential Geometry
 and Knot Theory descriptors of protein structures. 
@@ -42,7 +42,7 @@ conda activate melodia_py
 ```
 
 ```shell
-python setup.py install
+pip install -e ".[all]"
 ```
 
 ## Documentation

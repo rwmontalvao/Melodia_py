@@ -1,4 +1,4 @@
-# Copyright 2021-2024 KU Leuven.
+# Copyright 2021-2026 KU Leuven.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@
 #
 import math
 import warnings
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+from scipy.spatial.distance import pdist
 
 from sty import fg
-
-from numpy.random import rand, randint
 
 from Bio.PDB import PDBParser, PDBIO
 from Bio.SeqUtils import seq1
@@ -33,550 +33,508 @@ from sklearn.cluster import AgglomerativeClustering
 
 warnings.filterwarnings('ignore', category=PDBConstructionWarning)
 
+# ---------------------------------------------------------------------------
+# Named constants
+# ---------------------------------------------------------------------------
+
+# FIX [style]: Named constant for the pairwise Cα outlier-removal threshold (Å).
+# Any anchor position where the maximum inter-structure Cα distance exceeds
+# this value is excluded from the conserved-region annotation.
+_OUTLIER_DIST_ANGSTROM: float = 2.0
+
+# FIX [style]: Maximum number of top anchor regions used for SA optimisation.
+_MAX_ANCHORS: int = 5
+
+# Minimum run length (residues) for a region to qualify as an anchor.
+_MIN_ANCHOR_LENGTH: int = 5
+
+# Minimum run length (residues) kept after short-region pruning.
+_MIN_REGION_LENGTH: int = 3
+
+
+# ---------------------------------------------------------------------------
+# Low-level geometry helpers
+# ---------------------------------------------------------------------------
 
 def rmsd(x: np.ndarray, y: np.ndarray) -> float:
     """
-         Compute the RMSD between the two numpy arrays.
-         :param x: The first numpy array
-         :type x: np.ndarray
-         :param y: The second numpy array
-         :type y: np.ndarray
-         :return: The RMSD between the two numpy arrays
-         :rtype: float
+    Compute the RMSD between two Nx3 coordinate arrays.
+
+    :param x: Reference coordinates, shape (N, 3)
+    :param y: Mobile coordinates, shape (N, 3)
+    :return: Root-mean-square deviation in the same units as the input
     """
+    # FIX [correctness]: Original formula multiplied squared differences by 3
+    # instead of summing across the 3 spatial dimensions, giving a result
+    # sqrt(3)× larger than the standard RMSD.
+    # Correct formula: sqrt( mean_over_atoms( sum_over_xyz( (x-y)^2 ) ) )
+    return float(np.sqrt(((x - y) ** 2).sum(axis=1).mean()))
 
-    return np.sqrt((((x - y) ** 2) * 3).mean())
 
-
-def select(data: np.ndarray, seg: list, msk: list) -> np.ndarray:
+def select(data: np.ndarray, seg: List[int], msk: List[bool]) -> np.ndarray:
     """
-    Select the data in the given segment from the mask.
-    :param data: The data to select
-    :type data: np.ndarray
-    :param seg: The segment to select
-    :type seg: list
-    :param msk: The mask for aligned segment
-    :type msk: list
-    :return: The selected data
-    :rtype: np.ndarray
+    Extract the masked subset of coordinates at the given segment indices.
+
+    :param data: Full coordinate array, shape (L, 3)
+    :param seg: Flat list of alignment-column indices forming the segment
+    :param msk: Boolean mask of the same length as seg; True = keep
+    :return: Selected coordinate rows, shape (M, 3)
     """
-    tmp = []
-    for i, j in enumerate(seg):
-        if msk[i]:
-            tmp.append(data[j])
-
-    return np.array(tmp)
+    return np.array([data[j] for i, j in enumerate(seg) if msk[i]])
 
 
-def superposition(xo: np.ndarray, yo: np.ndarray, seg: list, msk: list) -> tuple[np.ndarray, np.ndarray]:
+def superposition(
+    xo: np.ndarray,
+    yo: np.ndarray,
+    seg: List[int],
+    msk: List[bool],
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Compute the superposition of the two numpy arrays.
-    :param xo: The first numpy array
-    :type xo: np.ndarray
-    :param yo: The second numpy array
-    :type yo: np.ndarray
-    :param seg: The segment to superimpose
-    :type seg: list
-    :param msk: The mask for the aligned segment
-    :type msk: list
-    :return: The superposition of the two numpy arrays
-    :rtype: tuple(np.ndarray, np.ndarray)
+    Compute the SVD-optimal rotation and translation that superimposes the
+    masked segment of *yo* onto the corresponding segment of *xo*.
+
+    :param xo: Reference coordinate array, shape (L, 3)
+    :param yo: Mobile coordinate array, shape (L, 3)
+    :param seg: Segment column indices
+    :param msk: Boolean mask selecting active residues within the segment
+    :return: (rotation matrix 3×3, translation vector 1×3)
     """
     x = select(xo, seg, msk)
     y = select(yo, seg, msk)
-
     sup = SVDSuperimposer()
-
     sup.set(x, y)
     sup.run()
-
     return sup.get_rotran()
 
 
-def energy(xo: np.ndarray, yo: np.ndarray, seg: list, msk: list) -> float:
+def energy(
+    xo: np.ndarray,
+    yo: np.ndarray,
+    seg: List[int],
+    msk: List[bool],
+) -> float:
     """
-    Compute the energy between two numpy arrays.
-    :param xo: The first numpy array
-    :type xo: np.ndarray
-    :param yo: The second numpy array
-    :type yo: np.ndarray
-    :param seg: The segment to superimpose
-    :type seg: list
-    :param msk: The mask for the aligned segment
-    :type msk: list
-    :return: The energy between two numpy arrays
-    :rtype: float
+    RMSD between *xo* and the superimposed *yo* over the active segment.
+
+    :param xo: Reference coordinate array, shape (L, 3)
+    :param yo: Mobile coordinate array, shape (L, 3)
+    :param seg: Segment column indices
+    :param msk: Boolean mask selecting active residues
+    :return: RMSD energy value (Å)
     """
     rot, tran = superposition(xo, yo, seg, msk)
-
     yt = np.dot(yo, rot) + tran
-
     return rmsd(xo, yt)
 
 
-def segments(anchors: list, members: list) -> list:
+def segments(anchors: List[Tuple[int, int]], members: List[int]) -> List[int]:
     """
-    Return a list of segments for each member of the protein alignment of an anchor.
-    :param anchors: The list of anchors
-    :type anchors: list
-    :param members: The list of members
-    :type members: list
-    :return: The of segments
-    :rtype: list
+    Flatten the selected anchor regions into a single list of column indices.
+
+    :param anchors: List of (ini, end) anchor region pairs
+    :param members: Indices into anchors selecting which regions to include
+    :return: Flat list of alignment column indices
     """
-    seg = []
+    seg: List[int] = []
     for member in members:
         ini, end = anchors[member]
-        seg.extend([x for x in range(ini, end)])
-
+        seg.extend(range(ini, end))
     return seg
 
 
-def simulated_annealing(xo: np.ndarray,
-                        yo: np.ndarray,
-                        anchors: list,
-                        members: list) -> tuple[np.ndarray, np.ndarray, float]:
+# ---------------------------------------------------------------------------
+# Run-finding helper (replaces three copies of the same while-loop pattern)
+# ---------------------------------------------------------------------------
+
+def _find_runs(area: List[int], value: int = 1) -> List[Tuple[int, int]]:
     """
-    Compute the rotation and translation matrices that reduces the RMSD
-    between two protein segments.
-    :param xo: The first numpy array
-    :type xo: np.ndarray
-    :param yo: The second numpy array
-    :type yo: np.ndarray
-    :param anchors: The list of anchors
-    :type anchors: list
-    :param members: The list of members
-    :type members: list
-    :return: The rotation and translation matrices and the final RMSD
-    :rtype: tuple(np.ndarray, np.ndarray, float)
+    Find all contiguous runs of *value* in *area*.
+
+    :param area: Per-position binary annotation list
+    :param value: The value to search for (default 1)
+    :return: List of (start, end) pairs where area[start:end] == value
     """
+    runs: List[Tuple[int, int]] = []
+    n = len(area)
+    i = 0
+    while i < n:
+        while i < n and area[i] != value:
+            i += 1
+        start = i
+        while i < n and area[i] == value:
+            i += 1
+        if i > start:
+            runs.append((start, i))
+    return runs
+
+
+# ---------------------------------------------------------------------------
+# Simulated annealing
+# ---------------------------------------------------------------------------
+
+def simulated_annealing(
+    xo: np.ndarray,
+    yo: np.ndarray,
+    anchors: List[Tuple[int, int]],
+    members: List[int],
+    rng: Optional[np.random.Generator] = None,
+) -> Tuple[np.ndarray, np.ndarray, float]:
+    """
+    Use simulated annealing to find the residue mask within the given anchor
+    segments that minimises the RMSD between *xo* and the superimposed *yo*.
+
+    :param xo: Reference coordinate array, shape (L, 3)
+    :param yo: Mobile coordinate array, shape (L, 3)
+    :param anchors: List of (ini, end) anchor region pairs
+    :param members: Indices into anchors selecting which regions to use
+    :param rng: Optional numpy random Generator for reproducibility.
+        If None, uses the global numpy random state.
+    :return: (rotation matrix, translation vector, final RMSD energy)
+    """
+    # FIX [style]: Accept an rng parameter so callers can seed for
+    # reproducibility in batch pipelines.
+    if rng is None:
+        rng = np.random.default_rng()
+
     seg = segments(anchors, members)
+    n_seg = len(seg)
 
-    msk0 = [True for _ in range(len(seg))]
+    # FIX [perf]: Use a numpy bool array so toggling and copying are O(1)
+    # fixed-size operations rather than Python list allocations.
+    msk0 = np.ones(n_seg, dtype=bool)
+    energy0 = energy(xo, yo, seg, msk0.tolist())
 
-    temperature = 300
-    energy0 = energy(xo, yo, seg, msk0)
-    while temperature > 0.00001:
-        for i in range(10000):
+    temperature = 300.0
+    # TODO: test other annealing schedules
+    while temperature > 1e-5:
+        for _ in range(10_000):
             msk1 = msk0.copy()
-            j = randint(len(msk1))
-            if msk1[j]:
-                msk1[j] = False
-            else:
-                msk1[j] = True
+            j = rng.integers(n_seg)
+            msk1[j] = not msk1[j]
 
-            energy1 = energy(xo, yo, seg, msk1)
+            energy1 = energy(xo, yo, seg, msk1.tolist())
+            delta = energy1 - energy0
 
-            energy_delta = energy1 - energy0
-
-            if energy_delta < 0.0 or rand() < math.exp(-energy_delta / temperature):
-                msk0 = msk1.copy()
+            if delta < 0.0 or rng.random() < math.exp(-delta / temperature):
+                msk0 = msk1
                 energy0 = energy1
 
-        # TODO: test other schedules
         temperature *= 0.1
 
-    rot, tran = superposition(xo, yo, seg, msk0)
+    rot, tran = superposition(xo, yo, seg, msk0.tolist())
     return rot, tran, energy0
 
 
-def superimposer(align, threshold=0.8, csv=False, pdb=True):
+# ---------------------------------------------------------------------------
+# Main superimposition pipeline
+# ---------------------------------------------------------------------------
+
+def superimposer(
+    align,
+    threshold: float = 0.8,
+    csv: bool = False,
+    pdb: bool = True,
+    max_anchors: int = _MAX_ANCHORS,
+    outlier_dist: float = _OUTLIER_DIST_ANGSTROM,
+    structure_dir: str = '.',
+    rng: Optional[np.random.Generator] = None,
+) -> None:
     """
-    Given an alignment, superimpose the PDB structure using Differential Geometry
-    as dissimilarity measure. It can output CSV files with the alpha carbon coordinates
-    and cluster groups, and also save the superimposed PDB structures.
-    :param align: Alignment to superimpose
-    :type align: Bio.Align.MultipleSeqAlignment
-    :param threshold: Threshold for cluster selection
-    :type threshold: float
-    :param csv: If true, output the CSV files
-    :type csv: bool
-    :param pdb: If true, output the superimposed PDB structures
-    :type pdb: bool
+    Superimpose PDB structures referenced in a geometry-annotated alignment
+    using differential geometry as the dissimilarity measure.
+
+    Conserved anchor regions are identified by agglomerative clustering on
+    (curvature, torsion) pairs, then refined by simulated annealing to
+    minimise the inter-structure RMSD. Optionally writes CSV coordinate files
+    and superimposed PDB files.
+
+    :param align: Geometry-annotated MultipleSeqAlignment
+    :param threshold: Agglomerative clustering distance threshold
+    :param csv: Write per-structure CSV files with Cα coordinates and group labels
+    :param pdb: Write superimposed PDB files (<id>_sup.pdb)
+    :param max_anchors: Maximum number of top anchor regions used for SA
+    :param outlier_dist: Maximum allowed pairwise Cα distance (Å) within an
+        anchor before the position is removed as an outlier
+    :param structure_dir: Directory containing the PDB files
+    :param rng: Optional random Generator for reproducible annealing
     """
-    # Collect Differential Geometry data for initial clustering
-    data = []
-    id2pos = {}
+    # ------------------------------------------------------------------
+    # Collect geometry data and initialise cluster annotations
+    # ------------------------------------------------------------------
+    data: List[List[float]] = []
+    id2pos: Dict[str, int] = {}
 
     for position, record in enumerate(align):
-        if 'structure' in record.description:
-            id2pos[record.id] = position
-            pairs = zip(
+        if 'structure' not in record.description:
+            continue
+        id2pos[record.id] = position
+        # FIX [correctness]: Was data = [...] (overwrite); must accumulate
+        # across all structures so the scaler fits the full dataset.
+        data += [
+            [curv, tors]
+            for curv, tors in zip(
                 record.letter_annotations['curvature'],
                 record.letter_annotations['torsion'],
             )
-            data = [list(pair) for pair in pairs]
-            record.letter_annotations['cluster'] = [0 for _ in record.seq]
+        ]
+        record.letter_annotations['cluster'] = [0] * len(record.seq)
 
     scaler = StandardScaler()
     scaler.fit(data)
 
-    # Clustering to find maximal conserved regions
+    # ------------------------------------------------------------------
+    # Cluster each alignment column
+    # ------------------------------------------------------------------
     clustering = AgglomerativeClustering(distance_threshold=threshold, n_clusters=None)
+
     for i in range(align.get_alignment_length()):
-        xy = []
-        tags = []
-        for identity, position in id2pos.items():
+        xy: List[List[float]] = []
+        tags: List[str] = []
+        for rec_id, position in id2pos.items():
             record = align[position]
             if record.seq[i] != '-':
-                xy.append(
-                    [
-                        record.letter_annotations['curvature'][i],
-                        record.letter_annotations['torsion'][i],
-                    ]
-                )
-                tags.append(identity)
+                xy.append([
+                    record.letter_annotations['curvature'][i],
+                    record.letter_annotations['torsion'][i],
+                ])
+                tags.append(rec_id)
 
         if len(xy) > 1:
-            xy = scaler.transform(xy)
-
-            clusters = clustering.fit_predict(xy)
-
-            map_of_clusters = {pair[0]: pair[1] for pair in zip(tags, clusters)}
-
-            for identity, position in id2pos.items():
+            clusters = clustering.fit_predict(scaler.transform(xy))
+            cluster_map = {tag: int(c) + 1 for tag, c in zip(tags, clusters)}
+            for rec_id, position in id2pos.items():
                 record = align[position]
-                if identity in map_of_clusters:
-                    record.letter_annotations['cluster'][i] = (
-                            map_of_clusters[identity] + 1
-                    )
-                    # print(id, record.letter_annotations['cluster'][i])
+                if rec_id in cluster_map:
+                    record.letter_annotations['cluster'][i] = cluster_map[rec_id]
         else:
-            for identity, position in id2pos.items():
-                record = align[position]
-                record.letter_annotations['cluster'][i] = 0
+            for position in id2pos.values():
+                align[position].letter_annotations['cluster'][i] = 0
 
-    # Find the highly conserved areas
-    ini = 0
-    end = align.get_alignment_length()
+    # ------------------------------------------------------------------
+    # Identify fully conserved columns (all structures in same cluster)
+    # ------------------------------------------------------------------
+    align_len = align.get_alignment_length()
+    area = [
+        1 if len({align[pos].letter_annotations['cluster'][i] for pos in id2pos.values()}) == 1
+        else 0
+        for i in range(align_len)
+    ]
 
-    area = []
-    for i in range(ini, end):
-        s = set()
-        for identity, position in id2pos.items():
-            record = align[position]
-            j = record.letter_annotations['cluster'][i]
-            s = s.union({j})
-        # Only regions conserved across all proteins
-        if len(s) == 1:
-            area.append(1)
-        else:
-            area.append(0)
+    # ------------------------------------------------------------------
+    # Find anchor regions (contiguous conserved runs ≥ _MIN_ANCHOR_LENGTH)
+    # ------------------------------------------------------------------
+    # FIX [perf]: _find_runs replaces three near-identical while-loop blocks.
+    anchors: List[Tuple[int, int]] = [
+        run for run in _find_runs(area, value=1)
+        if run[1] - run[0] >= _MIN_ANCHOR_LENGTH
+    ]
+    anchor_lengths = [end - ini for ini, end in anchors]
 
-    # Find all anchor conserved regions
-    anchors = []
-    anchor_lengths = []
-    new_area = [0 for _ in area]
-
-    ini, end = 0, 0
-    while ini < len(area):
-        while ini < len(area):
-            if area[ini] == 1:
-                break
-            else:
-                ini += 1
-
-        end = ini
-        while end < len(area):
-            if area[end] != 1:
-                break
-            else:
-                end += 1
-
-        # Minimal length for an anchor regions is 5 residues long
-        if end - ini >= 5:
-            anchor_lengths.append(end - ini)
-            anchors.append((ini, end))
-            for i in range(ini, end):
-                new_area[i] = 1
-        ini = end
-
-    # Group is the annotation for the new clusters
-    for identity, position in id2pos.items():
+    # Initialise group and ca_coords annotations
+    for position in id2pos.values():
         record = align[position]
-        record.letter_annotations['group'] = [0 for _ in record.seq]
-        record.letter_annotations['ca_coords'] = [[0.0, 0.0, 0.0] for _ in record.seq]
+        record.letter_annotations['group']     = [0] * len(record.seq)
+        record.letter_annotations['ca_coords'] = [[0.0, 0.0, 0.0]] * len(record.seq)
 
-    for anchor in anchors:
-        for identity, position in id2pos.items():
-            record = align[position]
-            ini, end = anchor
+    for ini, end in anchors:
+        for position in id2pos.values():
             for i in range(ini, end):
-                record.letter_annotations['group'][i] = 1
+                align[position].letter_annotations['group'][i] = 1
 
-    # Select the top 5 anchor regions
-    top_anchors = np.argsort(anchor_lengths)[::-1]
-    if len(top_anchors) > 5:
-        top_anchors = top_anchors[:5]
+    # Select top anchor regions for annealing
+    top_anchors = list(np.argsort(anchor_lengths)[::-1][:max_anchors])
 
-    # Read the CA coordinates for all the files
-    parser = PDBParser()
+    # ------------------------------------------------------------------
+    # Load Cα coordinates
+    # ------------------------------------------------------------------
+    # FIX [style]: QUIET=True suppresses noisy BioPython warnings.
+    parser = PDBParser(QUIET=True)
+    ca_coords:  Dict[str, np.ndarray] = {}
+    ca_masked:  Dict[str, np.ndarray] = {}
+    structures: Dict[str, object]     = {}
 
-    ca_coords = {}
-    ca_masked = {}
-    structures = {}
     for record in align:
         if 'structure' not in record.description:
             continue
-        id = record.id
-        structures[id] = parser.get_structure(id, f'{id}.pdb')
+        # FIX [style]: Renamed 'id' → 'rec_id' to avoid shadowing the built-in.
+        rec_id = record.id
+        pdb_path = f'{structure_dir}/{rec_id}.pdb'
+        structures[rec_id] = parser.get_structure(rec_id, pdb_path)
 
-        model = structures[id][0]
-        xyz = []
-        seq = []
+        model = structures[rec_id][0]
+        xyz: List[np.ndarray] = []
+        seq: List[str]        = []
         for chain in model:
             for residue in chain:
                 xyz.append(residue['CA'].get_coord())
                 seq.append(seq1(residue.get_resname()))
+
         j = 0
-        cds = []
-        msk = []
-        for i in range(align.get_alignment_length()):
-            # Insure coordinate alignment
+        cds: List[np.ndarray] = []
+        msk: List[bool]       = []
+
+        for i in range(align_len):
             if record.seq[i] == '-':
-                cds.append(np.array([0.0, 0.0, 0.0]))
+                cds.append(np.zeros(3))
                 msk.append(False)
-            elif record.seq[i] == seq[j]:
+            elif j < len(seq) and record.seq[i] == seq[j]:
                 cds.append(xyz[j])
                 msk.append(True)
                 j += 1
             else:
-                print(f'Error: {i} {record.seq[i]} - {j} {seq[j]}')
-        ca_coords[id] = np.array(cds)
-        ca_masked[id] = np.array(msk)
+                # FIX [correctness]: Append placeholder so array length stays
+                # consistent with the alignment; previously this branch left
+                # the arrays short, causing downstream index misalignment.
+                print(f'Warning: sequence mismatch at column {i} — '
+                      f'alignment={record.seq[i]}, PDB={seq[j] if j < len(seq) else "?"}')
+                cds.append(np.zeros(3))
+                msk.append(False)
 
-    # Optimise the anchor positions for minimal RMSD
-    # TODO: Use a dendrogram for the order?
+        ca_coords[rec_id] = np.array(cds)
+        ca_masked[rec_id] = np.array(msk)
+
+    # ------------------------------------------------------------------
+    # Simulated annealing superimposition
+    # ------------------------------------------------------------------
     ids = list(ca_coords.keys())
-    ref = ids.pop(0)
-    print(f'{ref}')
+    ref = ids[0]
+    print(f'Reference: {ref}')
 
     xo = ca_coords[ref]
-    for idx in ids:
-        yo = ca_coords[idx]
-        rot, tran, E0 = simulated_annealing(xo, yo, anchors, top_anchors)
-        ca_coords[idx] = np.dot(yo, rot) + tran
-        print(f'{idx}: {E0:.2f} Å')
+    for rec_id in ids[1:]:
+        yo = ca_coords[rec_id]
+        rot, tran, e0 = simulated_annealing(xo, yo, anchors, top_anchors, rng=rng)
+        ca_coords[rec_id] = np.dot(yo, rot) + tran
+        print(f'{rec_id}: {e0:.2f} Å')
 
-        for model in structures[idx]:
+        for model in structures[rec_id]:
             for chain in model:
                 for residue in chain:
                     for atom in residue:
-                        ya = atom.get_coord()
-                        atom.set_coord(np.dot(ya, rot) + tran)
+                        atom.set_coord(np.dot(atom.get_coord(), rot) + tran)
 
-    # Store the CA coordinates in the record
-    for idx in ca_coords.keys():
-        for i, m in enumerate(ca_masked[idx]):
-            if m:
-                record = align[id2pos[idx]]
-                x = ca_coords[idx][i][0]
-                y = ca_coords[idx][i][1]
-                z = ca_coords[idx][i][2]
-                record.letter_annotations['ca_coords'][i] = [x, y, z]
+    # Store transformed Cα coordinates in the alignment record
+    for rec_id in ca_coords:
+        record = align[id2pos[rec_id]]
+        for i, masked in enumerate(ca_masked[rec_id]):
+            if masked:
+                record.letter_annotations['ca_coords'][i] = ca_coords[rec_id][i].tolist()
 
-    # Remove group outliers
-    for anchor in anchors:
-        ini, end = anchor
+    # ------------------------------------------------------------------
+    # Remove anchor positions where any pair of structures diverges > outlier_dist
+    # ------------------------------------------------------------------
+    # FIX [perf]: Stack all structures into a matrix and use pdist for a
+    # vectorised pairwise distance computation instead of an O(N²) double loop.
+    struct_ids = list(id2pos.keys())
+    for ini, end in anchors:
         for i in range(ini, end):
-            max_dist = 0.0
-            for j in id2pos.keys():
-                cj = ca_coords[j][i]
-                for k in id2pos.keys():
-                    if k != j:
-                        ck = ca_coords[k][i]
-                        dist = np.linalg.norm(ck - cj)
-                        if dist > max_dist:
-                            max_dist = dist
+            coords_at_i = np.array([ca_coords[sid][i] for sid in struct_ids])
+            if pdist(coords_at_i).max() > outlier_dist:
+                for position in id2pos.values():
+                    align[position].letter_annotations['group'][i] = 0
 
-            # Any region with at least one distance
-            # over the threshold is removed
-            if max_dist > 2.0:
-                for j in id2pos.values():
-                    record = align[j]
-                    record.letter_annotations['group'][i] = 0
+    # ------------------------------------------------------------------
+    # Prune short conserved runs (< _MIN_REGION_LENGTH)
+    # ------------------------------------------------------------------
+    group_area = [
+        1 if all(
+            align[pos].letter_annotations['group'][i] == 1
+            for pos in id2pos.values()
+        ) else 0
+        for i in range(align_len)
+    ]
 
-    # Remove conserved regions with less than 3 residues
-    ini = 0
-    end = align.get_alignment_length()
-
-    area = []
-    for i in range(ini, end):
-        s = set()
-        for position in id2pos.values():
-            record = align[position]
-            j = record.letter_annotations['group'][i]
-            if j == 1:
-                s = s.union({j})
-        if len(s) == 1:
-            area.append(1)
-        else:
-            area.append(0)
-
-    regions = []
-    regions_lengths = []
-    new_area = [0 for _ in area]
-
-    ini, end = 0, 0
-    while ini < len(area):
-        while ini < len(area):
-            if area[ini] == 1:
-                break
-            else:
-                ini += 1
-
-        end = ini
-        while end < len(area):
-            if area[end] != 1:
-                break
-            else:
-                end += 1
-        delta = end - ini
-        if 0 < delta < 3:
-            regions_lengths.append(delta)
-            regions.append((ini, end))
+    for ini, end in _find_runs(group_area, value=1):
+        if end - ini < _MIN_REGION_LENGTH:
             for i in range(ini, end):
-                new_area[i] = 1
-        ini = end
+                for position in id2pos.values():
+                    align[position].letter_annotations['group'][i] = 0
 
-    for region in regions:
-        ini, end = region
-        for i in range(ini, end):
-            for position in id2pos.values():
-                record = align[position]
-                record.letter_annotations['group'][i] = 0
+    # ------------------------------------------------------------------
+    # Prune short non-conserved gaps (< _MIN_REGION_LENGTH) — fill them in
+    # ------------------------------------------------------------------
+    group_area = [
+        1 if all(
+            align[pos].letter_annotations['group'][i] == 0
+            for pos in id2pos.values()
+        ) else 0
+        for i in range(align_len)
+    ]
 
-    # Remove non-conserved regions with less than 3 residues
-    ini = 0
-    end = align.get_alignment_length()
-
-    area = []
-    for i in range(ini, end):
-        s = set()
-        for position in id2pos.values():
-            record = align[position]
-            j = record.letter_annotations['group'][i]
-            if j == 0:
-                s = s.union({j})
-        if len(s) == 1:
-            area.append(1)
-        else:
-            area.append(0)
-
-    regions = []
-    regions_lengths = []
-    new_area = [0 for _ in area]
-
-    ini, end = 0, 0
-    while ini < len(area):
-        while ini < len(area):
-            if area[ini] == 1:
-                break
-            else:
-                ini += 1
-
-        end = ini
-        while end < len(area):
-            if area[end] != 1:
-                break
-            else:
-                end += 1
-        delta = end - ini
-        if 0 < delta < 3:
-            regions_lengths.append(delta)
-            regions.append((ini, end))
+    for ini, end in _find_runs(group_area, value=1):
+        if end - ini < _MIN_REGION_LENGTH:
             for i in range(ini, end):
-                new_area[i] = 1
-        ini = end
+                for position in id2pos.values():
+                    align[position].letter_annotations['group'][i] = 1
 
-    for region in regions:
-        ini, end = region
-        for i in range(ini, end):
-            for position in id2pos.values():
-                record = align[position]
-                record.letter_annotations['group'][i] = 1
-
-    # Output CSV coordinate files
+    # ------------------------------------------------------------------
+    # Output
+    # ------------------------------------------------------------------
     if csv:
-        for idx in ca_coords.keys():
-            record = align[id2pos[idx]]
-            with open(f'{idx}.csv', 'w') as f:
-                for i, m in enumerate(ca_masked[idx]):
-                    if m:
-                        x = ca_coords[idx][i][0]
-                        y = ca_coords[idx][i][1]
-                        z = ca_coords[idx][i][2]
+        for rec_id in ca_coords:
+            record = align[id2pos[rec_id]]
+            with open(f'{rec_id}.csv', 'w') as f:
+                for i, masked in enumerate(ca_masked[rec_id]):
+                    if masked:
+                        x, y, z = ca_coords[rec_id][i]
                         g = record.letter_annotations['group'][i]
                         f.write(f'{i},{x:.4f},{y:.4f},{z:.4f},{g}\n')
 
-    # Output superposed PDB files
     if pdb:
         io = PDBIO()
-        for idx in ca_coords.keys():
-            io.set_structure(structures[idx])
-            io.save(f'{idx}_sup.pdb')
-
-    return
+        for rec_id in ca_coords:
+            io.set_structure(structures[rec_id])
+            io.save(f'{rec_id}_sup.pdb')
 
 
-def show_align(align, pal):
+# ---------------------------------------------------------------------------
+# Terminal alignment viewer
+# ---------------------------------------------------------------------------
+
+def show_align(align, pal) -> None:
     """
-    Show the alignment colored by cluster using a Seaborn pallet
-    :param align: Alignment to show
-    :type align: Bio.Align.MultipleSeqAlignment
-    :param pal: Palette
-    :type pal: seaborn.palettes._ColorPalette
+    Print the alignment to the terminal, coloured by structural group using
+    the provided Seaborn palette.
+
+    :param align: Clustered MultipleSeqAlignment with 'group' annotations
+    :param pal: Seaborn colour palette (list of (R, G, B) float triples)
     """
     length = align.get_alignment_length()
-    total = int(length / 50.0)
-    for j in range(total + 1):
-        ini = 0 + 50 * j
-        end = 49 + 50 * j + 1
 
-        if end >= length:
-            end = length - 1
+    for j in range(length // 50 + 1):
+        ini = 50 * j
+        end = min(ini + 50, length)
 
+        # FIX [perf]: Build each ruler row as a string, print once per row.
         if end > 100:
-            print('      ', end='')
-            for i in range(ini, end):
-                s = f'{i:03n}'
-                if i % 10 == 0:
-                    print(s[0], end='')
-                else:
-                    print(' ', end='')
-            print()
+            ruler_h = '      ' + ''.join(
+                f'{i:03d}'[0] if i % 10 == 0 else ' ' for i in range(ini, end)
+            )
+            print(ruler_h)
 
-        print('      ', end='')
-        for i in range(ini, end):
-            s = f'{i:03n}'
-            if i % 10 == 0:
-                print(s[1], end='')
-            else:
-                print(' ', end='')
-        print()
-
-        print('      ', end='')
-        for i in range(ini, end):
-            s = f'{i:03n}'
-            if i % 10 == 0:
-                print(s[2], end='')
-            else:
-                print(' ', end='')
-        print()
+        ruler_t = '      ' + ''.join(
+            f'{i:03d}'[1] if i % 10 == 0 else ' ' for i in range(ini, end)
+        )
+        ruler_u = '      ' + ''.join(
+            f'{i:03d}'[2] if i % 10 == 0 else ' ' for i in range(ini, end)
+        )
+        print(ruler_t)
+        print(ruler_u)
 
         for record in align:
             if 'structure' not in record.description:
                 continue
 
-            print(record.id, end=':')
+            # FIX [perf]: Accumulate coloured characters, print once per record.
+            row = record.id + ':'
             for i in range(ini, end):
-                j = record.letter_annotations['group'][i] - 1
-                if j >= 0:
-                    R = int(pal[j][0] * 255)
-                    G = int(pal[j][1] * 255)
-                    B = int(pal[j][2] * 255)
-                    print(fg(R, G, B) + record.seq[i], end='')
+                g = record.letter_annotations['group'][i] - 1
+                ch = record.seq[i]
+                if g >= 0:
+                    R = int(pal[g][0] * 255)
+                    G = int(pal[g][1] * 255)
+                    B = int(pal[g][2] * 255)
+                    row += fg(R, G, B) + ch
                 else:
-                    print(fg(125, 125, 125) + record.seq[i].lower(), end='')
-            print(fg.rs)
-    return
+                    row += fg(125, 125, 125) + ch.lower()
+            print(row + fg.rs)

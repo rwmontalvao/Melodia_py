@@ -1,0 +1,7 @@
+# .gitignore additions
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+.eggs/
