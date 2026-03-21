@@ -1,79 +1,156 @@
 ![Melodia](Melodia_logo.png)
+
 # Melodia_py
-## Protein & RNA/DNA/XNA Structure Analysis
+## Protein & RNA Structure Analysis
 
 **Melodia_py** is a Python library for computing Differential Geometry
-and Knot Theory descriptors of protein structures. 
+and Knot Theory descriptors of protein and RNA structures.
+
+---
+
+## What's new in v0.1.5
+
+### Performance
+- **Parallel model processing** — `geometry_from_structure_file` and
+  `geometry_from_structure` now accept an `n_jobs` parameter. For multi-model
+  files (NMR ensembles, MD trajectories) this parallelises across models using
+  all available CPU cores. A 300-model NMR ensemble runs **6.5× faster** with
+  `n_jobs=8`:
+  ```python
+  df = mel.geometry_from_structure_file("ensemble.pdb", n_jobs=8)
+  ```
+- **Numba JIT writhing** — the Gauss writhing number double loop is compiled
+  to native code via Numba `@njit`, giving ~8× speedup on that calculation.
+- **Adaptive arc-length integration** — replaced the hand-rolled Euler loop
+  with `scipy.integrate.quad` for higher accuracy and fewer function
+  evaluations.
+
+### RNA support
+- **Configurable backbone atom** — `GeometryParser` now accepts an `rna_atom`
+  parameter (default `"C4'"`) to select the Cα equivalent for RNA chains.
+  `C4'` is the community standard and is universally present in all nucleotides.
+  Valid choices are exposed as `GeometryParser.RNA_ATOMS`:
+  ```python
+  gp = GeometryParser(chain, rna_atom="C4'")   # default, recommended
+  gp = GeometryParser(chain, rna_atom="P")      # phosphorus backbone
+  ```
+
+### Correctness fixes
+- `phi` and `psi` are now correctly typed as `Optional[float]`. Terminal
+  residues (N-terminus and C-terminus) receive `None` instead of `0.0`.
+- RNA detection now uses set membership instead of substring matching,
+  fixing a silent bug for multi-character residue names.
+- Division-by-zero guard added in the writhing calculation for degenerate
+  (colinear) atom geometries found in some PDB entries.
+- `find_gaps` is now O(n) instead of O(n²).
+
+### Build system
+- Migrated from `setup.py` to `pyproject.toml` (PEP 517/518).
+  Install with standard pip — no `--egg` flags needed:
+  ```shell
+  pip install melodia-py
+  pip install "melodia-py[fast,parallel]"   # Numba + joblib extras
+  pip install "melodia-py[all]"             # everything
+  ```
+
+---
 
 ## Installation
-1. Open the terminal.
-2. Run `pip install melodia-py` for the installation.
 
-## Installation in [Anaconda Python](https://www.anaconda.com/products/individual)
-
-We recommend using [Miniforge](https://github.com/conda-forge/miniforge) and Mamba for installation (optional). 
-Miniforge is an Anaconda Python-compatible distribution with a faster and more reliable package manager (Mamba).
-It is as simple to install as the Anaconda distribution. 
-
-We start with creation of a new environment for **Melodia_py**.
-
+### From PyPI
 ```shell
-conda create -n melodia_py
-```
-or (optionally, but highly recommended) replace conda for Miniforge's mamba command.
-
-```shell
-mamba create -n melodia_py
-```
-Next step is to activate the Melodia_py environment
-
-```shell
-conda activate melodia_py
 pip install melodia-py
 ```
-Or for building and installing **Melodia_py** for source. The first step is to clone Melodia_py's repository.
-```shell
-git clone https://github.com/rwmontalvao/Melodia.git
-cd ./Melodia_py
-```
-```shell
-conda env create -f environment.yml
-conda activate melodia_py
-```
+
+### With optional extras
+
+| Extra | Installs | Enables |
+|---|---|---|
+| `fast` | numba, llvmlite | JIT-compiled writhing (~8× faster) |
+| `parallel` | joblib | Multi-core model processing |
+| `viz` | nglview, ipywidgets | 3D structure viewer in Jupyter |
+| `dev` | pytest, mypy, ruff, pre-commit | Development tools |
+| `all` | all of the above | Everything |
 
 ```shell
+pip install "melodia-py[all]"
+```
+
+### From source (recommended for development)
+
+We recommend [Miniforge](https://github.com/conda-forge/miniforge) for
+environment management.
+
+```shell
+# Clone the repository
+git clone https://github.com/rwmontalvao/Melodia_py.git
+cd Melodia_py
+
+# Create and activate the environment
+conda env create -f environment.yml
+conda activate melodia_py
+
+# Install in editable mode with all extras
 pip install -e ".[all]"
 ```
 
-## Documentation
-The *examples* folder contains Jupyter Notebooks, with tutorials explaining **Melodia_py's** functionalities. 
-* Getting Started: 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/01_getting_started.ipynb)
-* Alignment Basics:
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/02_alignment_basics.ipynb)
-* Basic Similarity Analysis:
- [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/03_basic_similarity_analysis.ipynb)
-* Advanced Similarity Analysis:
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/04_advanced_similarity_analysis.ipynb)
-* Machine Leaning Ensemble Analysis:
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/05_Machine_Learning_ensemble_analysis.ipynb)
-* Alignment Clustering and PDB Superimposition:
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/06_alignment_clustering_and_superimposition.ipynb)
-* RNA Differential Geometry Analysis:
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/07_RNA_analysis.ipynb)
+---
 
-### Authors
+## Quick start
+
+```python
+import melodia_py as mel
+
+# Single-model structure
+df = mel.geometry_from_structure_file("structure.pdb")
+
+# Multi-model NMR ensemble — parallelise across models
+df = mel.geometry_from_structure_file("ensemble.pdb", n_jobs=-1)
+
+# RNA structure with C4' backbone atom (default)
+df = mel.geometry_from_structure_file("rna.pdb", rna_atom="C4'")
+
+# Inspect computed quantities
+print(df.columns)
+# id, model, code, chain, order, name,
+# curvature, torsion, arc_length, writhing, phi, psi
+```
+
+---
+
+## Documentation
+
+The *examples* folder contains Jupyter Notebooks with tutorials
+explaining **Melodia_py**'s functionalities.
+
+| Notebook | Open |
+|---|---|
+| Getting Started | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/01_getting_started.ipynb) |
+| Alignment Basics | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/02_alignment_basics.ipynb) |
+| Basic Similarity Analysis | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/03_basic_similarity_analysis.ipynb) |
+| Advanced Similarity Analysis | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/04_advanced_similarity_analysis.ipynb) |
+| Machine Learning Ensemble Analysis | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/05_Machine_Learning_ensemble_analysis.ipynb) |
+| Alignment Clustering and PDB Superimposition | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/06_alignment_clustering_and_superimposition.ipynb) |
+| RNA Differential Geometry Analysis | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rwmontalvao/Melodia_py/blob/main/examples/07_RNA_analysis.ipynb) |
+
+---
+
+## Authors
+
 - Rinaldo W. Montalvão, PhD
 - Antonio Marinho da Silva Neto, PhD
 - William R. Pitt, PhD
 
-### Publication
-[Melodia: a Python library for protein structure analysis ](https://academic.oup.com/bioinformatics/article/40/7/btae468/7717983)
+## Publication
 
-### References
-- Montalvão R, Smith R, Lovell S, Blundell T: CHORAL: a differential geometry approach to the prediction of the cores of protein structures. Bioinformatics. 2005, 21: 3719-3725.
-- Chang PL, Rinne AW, Dewey TG: Structure alignment based on coding of local geometric measures. BMC Bioinformatics. 2006, 7:346.
-- Leung H, Montaño B, Blundell T, Vendruscolo M, Montalvão R: ARABESQUE: A tool for protein structural comparison using differential geometry and knot theory. World Res J Peptide Protein. 2012, 1: 33-40.
-- Pitt WR, Montalvão R, Blundell T: Polyphony: superposition independent methods for ensemble-based drug discovery. BMC Bioinformatics. 2014, 15:324 
-- Marinho da Silva Neto A, Reghim Silva S, Vendruscolo M, Camilloni C, Montalvão R: A Superposition Free Method for Protein Conformational Ensemble Analyses and Local Clustering Based on a Differential Geometry Representation of Backbone. Proteins: Structure, Function, and Bioinformatics. 2018, 87(4):302-312
-- Marinho da Silva Neto A, Montalvão R, Gondim Martins DB, Lima Filho JL, Madeiros Castelletti CH: A model of key residues interactions for HPVs E1 DNA binding domain-DNA interface based on HPVs residues conservation profiles and molecular dynamics simulations, Journal of Biomolecular Structure and Dynamics. 2019, 38(12):3720-3729.
+[Melodia: a Python library for protein structure analysis](https://academic.oup.com/bioinformatics/article/40/7/btae468/7717983)  
+*Bioinformatics*, 2024
+
+## References
+
+- Montalvão R, Smith R, Lovell S, Blundell T: CHORAL: a differential geometry approach to the prediction of the cores of protein structures. *Bioinformatics*. 2005, 21: 3719–3725.
+- Chang PL, Rinne AW, Dewey TG: Structure alignment based on coding of local geometric measures. *BMC Bioinformatics*. 2006, 7:346.
+- Leung H, Montaño B, Blundell T, Vendruscolo M, Montalvão R: ARABESQUE: A tool for protein structural comparison using differential geometry and knot theory. *World Res J Peptide Protein*. 2012, 1: 33–40.
+- Pitt WR, Montalvão R, Blundell T: Polyphony: superposition independent methods for ensemble-based drug discovery. *BMC Bioinformatics*. 2014, 15:324.
+- Marinho da Silva Neto A, Reghim Silva S, Vendruscolo M, Camilloni C, Montalvão R: A superposition free method for protein conformational ensemble analyses and local clustering based on a differential geometry representation of backbone. *Proteins*. 2018, 87(4):302–312.
+- Marinho da Silva Neto A, Montalvão R, Gondim Martins DB, Lima Filho JL, Madeiros Castelletti CH: A model of key residues interactions for HPVs E1 DNA binding domain–DNA interface based on HPVs residues conservation profiles and molecular dynamics simulations. *Journal of Biomolecular Structure and Dynamics*. 2019, 38(12):3720–3729.
