@@ -102,6 +102,209 @@ def geometry_from_structure(
     return proc_chains(structure, n_jobs=n_jobs, rna_atom=rna_atom, deg=deg)
 
 
+def geometry_from_mdanalysis(
+    universe,
+    n_jobs: int = 1,
+    rna_atom: str = "C4'",
+    deg: bool = True,
+    frames: Optional[List[int]] = None,
+) -> pd.DataFrame:
+    """
+    Compute per-residue geometric properties from an MDAnalysis Universe.
+
+    Each trajectory frame is treated as one "model", consistent with how
+    multi-model PDB files are handled by :func:`geometry_from_structure_file`.
+    This lets you compare NMR ensembles, MD trajectories, or coarse-grained
+    simulations with the same downstream geometry analysis.
+
+    MDAnalysis is an optional dependency.  If it is not installed a clear
+    ``ImportError`` is raised rather than a cryptic ``AttributeError``.
+
+    Supported topologies/trajectories: any format MDAnalysis can read
+    (PDB, GRO+XTC, DCD, mmCIF, …).
+
+    Example usage::
+
+        import MDAnalysis as mda
+        from melodia_py import geometry_from_mdanalysis
+
+        u = mda.Universe("system.gro", "traj.xtc")
+        df = geometry_from_mdanalysis(u, n_jobs=-1)
+
+    :param universe: ``MDAnalysis.Universe`` (or ``AtomGroup``) containing
+        the topology and, optionally, a trajectory.
+    :param n_jobs: Number of parallel worker processes.
+        ``1`` = sequential (default). ``-1`` = all CPUs.
+    :param rna_atom: Backbone atom name for RNA chains (default ``"C4'"``).
+        Protein chains always use ``CA``.
+    :param deg: Return phi/psi in degrees (True) or radians (False).
+    :param frames: List of 0-based frame indices to process.
+        ``None`` processes every frame in the trajectory (default).
+    :return: DataFrame with columns
+        ``id, model, code, chain, order, name, curvature, torsion,
+        arc_length, writhing`` and, for protein chains, ``phi, psi``.
+    :raises ImportError: If MDAnalysis is not installed.
+    :raises ValueError: If the universe contains no protein/RNA residues.
+    """
+    try:
+        import MDAnalysis as mda  # noqa: F401  (version check only)
+    except ImportError as exc:
+        raise ImportError(
+            "MDAnalysis is required for geometry_from_mdanalysis(). "
+            "Install it with:  pip install MDAnalysis"
+        ) from exc
+
+    # Resolve trajectory frame indices.
+    n_frames = universe.trajectory.n_frames
+    frame_indices: List[int] = list(range(n_frames)) if frames is None else list(frames)
+    if not frame_indices:
+        return pd.DataFrame()
+
+    # Extract coordinate data for every requested frame in the parent process.
+    # No MDAnalysis objects cross the process boundary — only plain dicts/lists.
+    tasks: List[dict] = []
+    for frame_idx in frame_indices:
+        universe.trajectory[frame_idx]
+        task = _extract_mda_frame_data(universe, frame_idx, rna_atom)
+        if task is not None:
+            tasks.append(task)
+
+    if not tasks:
+        return pd.DataFrame()
+
+    nested: List[List[dict]] = Parallel(n_jobs=n_jobs)(
+        delayed(_compute_model_geometry)(task, deg)
+        for task in tasks
+    )
+
+    records = [row for model_rows in nested for row in model_rows]
+    return pd.DataFrame(records)
+
+
+# ---------------------------------------------------------------------------
+# MDAnalysis coordinate extractor (runs in parent process only)
+# ---------------------------------------------------------------------------
+
+def _extract_mda_frame_data(
+    universe,
+    frame_idx: int,
+    rna_atom: str,
+) -> Optional[dict]:
+    """
+    Extract per-chain coordinate data from the **current** trajectory frame
+    of an MDAnalysis Universe into plain Python/NumPy objects.
+
+    This mirrors :func:`_extract_model_data` so that the existing
+    ``_compute_model_geometry`` worker can be reused without modification.
+    No MDAnalysis objects are returned — only plain dicts and lists.
+
+    Residues with HETATM-equivalent records (those whose ``resname`` is not
+    a standard amino acid or RNA nucleotide) are silently skipped, matching
+    the ``het_flag`` filter applied in the BioPython path.
+
+    :param universe: MDAnalysis Universe positioned at the desired frame.
+    :param frame_idx: 0-based frame index (used as the synthetic model id).
+    :param rna_atom: Backbone atom name for RNA residues.
+    :return: Task dict compatible with ``_compute_model_geometry``, or
+        ``None`` if no eligible chains are found.
+    """
+    from melodia_py.geometryparser import _RNA_RESIDUE_NAMES
+
+    # Standard amino acid residue names for HETATM filtering
+    _AA_NAMES: frozenset = frozenset({
+        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS',
+        'ILE', 'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP',
+        'TYR', 'VAL',
+        # Common non-standard residues that still carry a backbone
+        'MSE', 'SEC', 'PYL', 'HSD', 'HSE', 'HSP', 'HIE', 'HID', 'HIP',
+    })
+    _STANDARD_RESIDUES: frozenset = _AA_NAMES | _RNA_RESIDUE_NAMES
+
+    # Derive a PDB-style code from the universe filename (best-effort)
+    try:
+        import os
+        fname = universe.filename
+        pdb_code = os.path.splitext(os.path.basename(fname))[0].upper()
+    except AttributeError:
+        pdb_code = 'MDA'
+
+    # Group atoms by segid/chain (MDAnalysis segments map to PDB chains)
+    chain_data: List[dict] = []
+
+    for segment in universe.segments:
+        chain_id = segment.segid if segment.segid.strip() else segment.segid
+
+        # Collect standard residues only (skip water, lipids, ions, …)
+        residues = [
+            r for r in segment.residues
+            if r.resname.strip() in _STANDARD_RESIDUES
+        ]
+        if not residues:
+            continue
+
+        first_resname = residues[0].resname.strip()
+        rna  = first_resname in _RNA_RESIDUE_NAMES
+        atom = rna_atom if rna else 'CA'
+
+        needs_fallback = rna and atom in ("P", "C5'")
+        last_pos = residues[-1].resid if needs_fallback else None
+
+        coords:       List[List[float]] = []
+        residue_meta: List[Tuple[str, int]] = []
+        backbone:     List[Optional[Tuple]] = []
+
+        for res in residues:
+            pos     = int(res.resid)
+            resname = res.resname.strip()
+
+            # Locate the backbone atom for this residue
+            atom_names = [a.name for a in res.atoms]
+            if atom in atom_names:
+                atm = res.atoms[atom_names.index(atom)]
+                coord = atm.position.tolist()
+            elif needs_fallback and pos == last_pos:
+                # P or C5' absent at 5′ terminus — use first atom
+                coord = res.atoms[0].position.tolist()
+            else:
+                print(
+                    f'Warning: missing {atom} at {resname} {pos} '
+                    f'chain {chain_id} frame {frame_idx} — skipped'
+                )
+                continue
+
+            coords.append(coord)
+            residue_meta.append((resname, pos))
+
+            if not rna:
+                try:
+                    n_pos  = res.atoms[atom_names.index('N')].position.tolist()
+                    ca_pos = res.atoms[atom_names.index('CA')].position.tolist()
+                    c_pos  = res.atoms[atom_names.index('C')].position.tolist()
+                    backbone.append((n_pos, ca_pos, c_pos))
+                except (ValueError, KeyError):
+                    backbone.append(None)
+
+        if len(coords) < 2:
+            continue
+
+        chain_data.append({
+            'chain_id':     chain_id,
+            'rna':          rna,
+            'coords':       coords,
+            'residue_meta': residue_meta,
+            'backbone':     backbone,
+        })
+
+    if not chain_data:
+        return None
+
+    return {
+        'model_id': frame_idx,
+        'pdb_code': pdb_code,
+        'chains':   chain_data,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Model coordinate extraction (runs in parent process, BioPython-safe)
 # ---------------------------------------------------------------------------
