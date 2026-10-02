@@ -29,6 +29,9 @@ Correctness
   - Division-by-zero guard in calc_writhing for colinear atom pairs.
   - find_gaps is O(n) instead of O(n²).
   - find_anomalies raises NotImplementedError instead of silently returning [].
+  - calc_curvature_torsion maps each fitting window to [-1, 1]. Fitting on
+    the raw curve parameter was rank deficient past t ~ 10, so curvature and
+    torsion depended on the residue's position in the chain.
 
 Performance
   - calc_writhing inner double loop compiled to native code via Numba @njit.
@@ -401,9 +404,11 @@ class GeometryParser:
         A natural cubic spline has C² continuity at knots (one per residue).
         Its raw 3rd derivative is piecewise-constant and discontinuous at
         every knot, making torsion estimates very sensitive to local kinks.
-        Fitting a degree-10 Chebyshev polynomial over a ±1–3 residue window
+        Fitting a degree-10 Chebyshev polynomial over a ±1 residue window
         smooths across knot boundaries and gives scientifically consistent
-        curvature/torsion values that match the original implementation.
+        curvature/torsion values. The window is shifted inside [t[0], t[-1]]
+        near the chain ends and mapped to [-1, 1] before fitting, so the
+        result depends only on the local geometry, not on the value of *p*.
 
         :param p: Curve parameter at which to evaluate
         :param t: Full list of curve parameters (used to clamp the window)
@@ -416,44 +421,38 @@ class GeometryParser:
         mn = float(np.min(t))
         mx = float(np.max(t))
 
-        cxt = cyt = czt = None
+        ini = p - 1.0
+        end = p + 1.0
 
-        for dt in range(1, 4):
-            delta = float(dt)
-            ini   = p - delta
-            end   = p + delta
+        if ini < mn:
+            offset = mn - ini
+        elif end > mx:
+            offset = mx - end
+        else:
+            offset = 0.0
 
-            if ini < mn:
-                offset = mn - ini
-            elif end > mx:
-                offset = mx - end
-            else:
-                offset = 0.0
+        ini += offset
+        end += offset
 
-            ini += offset
-            end += offset
+        # Fit on the window mapped to s in [-1, 1]. Chebyshev polynomials grow
+        # like s**10 outside [-1, 1], so fitting on the raw parameter makes the
+        # least-squares problem rank deficient once t is past ~10, and the
+        # derivatives then depend on the residue's index. Mapped, the fit has
+        # full rank for any t. By the chain rule, d^m/dt^m = d^m/ds^m / half**m.
+        centre = 0.5 * (ini + end)
+        half   = 0.5 * (end - ini)
 
-            # _CHEB_SAMPLE_COUNT is odd so p always lies at the window centre
-            tp = np.linspace(ini, end, _CHEB_SAMPLE_COUNT)
+        # _CHEB_SAMPLE_COUNT is odd so p always lies at the window centre
+        tp = np.linspace(ini, end, _CHEB_SAMPLE_COUNT)
+        sp = (tp - centre) / half
+        s  = (p - centre) / half
 
-            cxt, res_x = chebyshev.chebfit(tp, xt(tp), deg=10, full=True)
-            cyt, res_y = chebyshev.chebfit(tp, yt(tp), deg=10, full=True)
-            czt, res_z = chebyshev.chebfit(tp, zt(tp), deg=10, full=True)
+        # One least-squares fit for x, y and z (one column each)
+        coef = chebyshev.chebfit(sp, np.column_stack((xt(tp), yt(tp), zt(tp))), deg=10)
 
-            if res_x[0].size != 0 and res_y[0].size != 0 and res_z[0].size != 0:
-                break
-
-        xt_d1 = chebyshev.chebval(p, chebyshev.chebder(cxt, m=1))
-        yt_d1 = chebyshev.chebval(p, chebyshev.chebder(cyt, m=1))
-        zt_d1 = chebyshev.chebval(p, chebyshev.chebder(czt, m=1))
-
-        xt_d2 = chebyshev.chebval(p, chebyshev.chebder(cxt, m=2))
-        yt_d2 = chebyshev.chebval(p, chebyshev.chebder(cyt, m=2))
-        zt_d2 = chebyshev.chebval(p, chebyshev.chebder(czt, m=2))
-
-        xt_d3 = chebyshev.chebval(p, chebyshev.chebder(cxt, m=3))
-        yt_d3 = chebyshev.chebval(p, chebyshev.chebder(cyt, m=3))
-        zt_d3 = chebyshev.chebval(p, chebyshev.chebder(czt, m=3))
+        xt_d1, yt_d1, zt_d1 = chebyshev.chebval(s, chebyshev.chebder(coef, m=1)) / half
+        xt_d2, yt_d2, zt_d2 = chebyshev.chebval(s, chebyshev.chebder(coef, m=2)) / half ** 2
+        xt_d3, yt_d3, zt_d3 = chebyshev.chebval(s, chebyshev.chebder(coef, m=3)) / half ** 3
 
         v1 = np.array([xt_d1, yt_d1, zt_d1])
         v2 = np.array([xt_d2, yt_d2, zt_d2])
