@@ -32,6 +32,11 @@ Correctness
   - calc_curvature_torsion maps each fitting window to [-1, 1]. Fitting on
     the raw curve parameter was rank deficient past t ~ 10, so curvature and
     torsion depended on the residue's position in the chain.
+  - Chains are split at breaks (consecutive CA atoms more than 4.2 Å apart)
+    and each segment gets its own spline, so no geometry is computed over a
+    connection that does not exist; a ChainBreakWarning lists the breaks.
+    phi/psi are None across a break. Values a segment is too short for are
+    NaN (curvature/torsion need 3 residues, writhing 5).
 
 Performance
   - calc_writhing inner double loop compiled to native code via Numba @njit.
@@ -54,6 +59,7 @@ New features
 """
 
 import math
+import warnings
 import numpy as np
 
 from Bio.PDB import Chain
@@ -79,6 +85,15 @@ _CHEB_SAMPLE_COUNT: int = 51
 
 # Epsilon for cross-product norm guard (division-by-zero protection).
 _NORM_EPS: float = 1e-10
+
+# Consecutive CA atoms further apart than this are not bonded (trans peptide
+# ~3.8 Å, cis ~2.9 Å): the chain is broken there.
+_MAX_CA_CA_DISTANCE: float = 4.2
+
+# Shortest unbroken segment each quantity can be computed on: the Chebyshev
+# window spans 3 residues, the writhing window 5.
+_MIN_CURVATURE_RESIDUES: int = 3
+_MIN_WRITHING_RESIDUES:  int = 5
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +210,47 @@ def _warmup_jit() -> None:
 
 
 _warmup_jit()
+
+
+# ---------------------------------------------------------------------------
+# Chain breaks
+# ---------------------------------------------------------------------------
+
+class ChainBreakWarning(UserWarning):
+    """A chain is broken; its geometry is computed separately on each side."""
+
+
+def _warn_breaks(breaks: List[Tuple[str, int, int, Any]]) -> None:
+    """
+    Emit one ChainBreakWarning listing every break found.
+
+    :param breaks: (chain_id, residue before, residue after, model id) per
+        break, for any number of chains and models
+    """
+    if not breaks:
+        return
+
+    models: Dict[Tuple[str, int, int], List[Any]] = defaultdict(list)
+    for chain_id, before, after, model in breaks:
+        models[(chain_id, before, after)].append(model)
+
+    def where(found: List[Any]) -> str:
+        if len(found) > 3:
+            return f'{len(found)} models'
+        return 'model ' + ', '.join(str(m) for m in found)
+
+    lines = [
+        f'chain {chain_id} between residues {before} and {after} ({where(found)})'
+        for (chain_id, before, after), found in models.items()
+    ]
+    warnings.warn(
+        f'Chain breaks (consecutive CA atoms more than {_MAX_CA_CA_DISTANCE} Å '
+        'apart): curvature, torsion, arc length and writhing are computed '
+        'separately on each side, and phi/psi are None across the break.\n  '
+        + '\n  '.join(lines),
+        ChainBreakWarning,
+        stacklevel=3,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +430,24 @@ class GeometryParser:
         return gaps
 
     @staticmethod
+    def find_breaks(coords: Any) -> List[int]:
+        """
+        Find chain breaks from the backbone coordinates: consecutive CA atoms
+        more than _MAX_CA_CA_DISTANCE apart. Unlike find_gaps, this catches
+        missing residues whatever the numbering, and ignores numbering jumps
+        across residues that are bonded.
+
+        :param coords: (n, 3) CA coordinates in chain order
+        :return: Indices i where residue i starts a new segment
+        :rtype: list[int]
+        """
+        coords = np.asarray(coords, dtype=np.float64)
+        if len(coords) < 2:
+            return []
+        distances = np.linalg.norm(np.diff(coords, axis=0), axis=1)
+        return [int(i) + 1 for i in np.flatnonzero(distances > _MAX_CA_CA_DISTANCE)]
+
+    @staticmethod
     def find_anomalies(chain: Chain.Chain) -> List[str]:
         """
         Find anomalies in the chain.
@@ -536,6 +610,71 @@ class GeometryParser:
         )
 
     @staticmethod
+    def calc_segment_geometry(coords: Any, rna: bool) -> np.ndarray:
+        """
+        Compute curvature, torsion, arc length and writhing for every residue
+        of one unbroken segment.
+
+        Values that need more residues than the segment has are NaN:
+        curvature and torsion need _MIN_CURVATURE_RESIDUES, writhing
+        _MIN_WRITHING_RESIDUES, arc length 2. RNA writhing is 0.0.
+
+        :param coords: (n, 3) backbone coordinates of the segment
+        :param rna: True for an RNA segment
+        :return: (n, 4) array: curvature, torsion, arc length, writhing
+        :rtype: numpy.ndarray
+        """
+        coords = np.ascontiguousarray(coords, dtype=np.float64)
+        n = len(coords)
+        geometry = np.full((n, 4), np.nan)
+        if rna:
+            geometry[:, 3] = 0.0
+        if n < 2:
+            return geometry
+
+        t = list(range(n))
+        xt = CubicSpline(t, coords[:, 0], bc_type='natural')
+        yt = CubicSpline(t, coords[:, 1], bc_type='natural')
+        zt = CubicSpline(t, coords[:, 2], bc_type='natural')
+
+        x = np.ascontiguousarray(coords[:, 0])
+        y = np.ascontiguousarray(coords[:, 1])
+        z = np.ascontiguousarray(coords[:, 2])
+
+        for i in range(n):
+            if n >= _MIN_CURVATURE_RESIDUES:
+                # Terminal residues use the nearest interior point for Chebyshev
+                p_curv = float(min(max(i, 1), n - 2))
+                geometry[i, 0:2] = GeometryParser.calc_curvature_torsion(
+                    p=p_curv, t=t, xt=xt, yt=yt, zt=zt
+                )
+            geometry[i, 2] = GeometryParser.calc_arc_length(p=float(i), xt=xt, yt=yt, zt=zt)
+            if not rna and n >= _MIN_WRITHING_RESIDUES:
+                geometry[i, 3] = _calc_writhing_jit(i, x, y, z, _NORM_EPS)
+
+        return geometry
+
+    @staticmethod
+    def calc_chain_geometry(coords: Any, breaks: List[int], rna: bool) -> np.ndarray:
+        """
+        Compute curvature, torsion, arc length and writhing for every residue
+        of a chain, separately on each segment between chain breaks, so no
+        spline or window spans a break.
+
+        :param coords: (n, 3) backbone coordinates in chain order
+        :param breaks: Indices where a new segment starts (see find_breaks)
+        :param rna: True for an RNA chain
+        :return: (n, 4) array: curvature, torsion, arc length, writhing
+        :rtype: numpy.ndarray
+        """
+        coords = np.asarray(coords, dtype=np.float64)
+        bounds = [0, *breaks, len(coords)]
+        return np.vstack([
+            GeometryParser.calc_segment_geometry(coords[start:stop], rna)
+            for start, stop in zip(bounds[:-1], bounds[1:])
+        ])
+
+    @staticmethod
     def calc_geometry(
         chain: Chain.Chain,
         deg: bool,
@@ -566,10 +705,8 @@ class GeometryParser:
                 if residue.id[0] == ' ':
                     last_rna_pos = residue.id[1]
 
-        t: List[float] = []
-        x: List[float] = []
-        y: List[float] = []
-        z: List[float] = []
+        coords:    List[List[float]] = []
+        positions: List[int]         = []
 
         residues:     Dict[int, ResidueGeometry] = {}
         residues_map: Dict[int, int]             = {}
@@ -592,10 +729,8 @@ class GeometryParser:
                     f'- {residue.get_full_id()}'
                 )
 
-            t.append(float(num))
-            x.append(float(coord[0]))
-            y.append(float(coord[1]))
-            z.append(float(coord[2]))
+            coords.append([float(c) for c in coord])
+            positions.append(pos)
 
             residues[num] = ResidueGeometry(
                 name=residue.get_resname(),
@@ -606,41 +741,22 @@ class GeometryParser:
             residues_map[pos] = num
             num += 1
 
-        # Fit backbone positions with a natural cubic spline
-        xt = CubicSpline(t, x, bc_type='natural')
-        yt = CubicSpline(t, y, bc_type='natural')
-        zt = CubicSpline(t, z, bc_type='natural')
+        breaks = [] if rna else GeometryParser.find_breaks(coords)
+        _warn_breaks([
+            (chain.id, positions[i - 1], positions[i], model)
+            for i in breaks
+        ])
 
-        ini = 0
-        end = len(t) - 1
-
-        for i, tp in enumerate(t):
-            # Terminal residues use the nearest interior point for Chebyshev
-            if ini < i < end:
-                p_curv = tp
-            elif i == ini:
-                p_curv = t[1]
-            else:
-                p_curv = t[-2]
-
-            curvature, torsion = GeometryParser.calc_curvature_torsion(
-                p=p_curv, t=t, xt=xt, yt=yt, zt=zt
-            )
-            arc_len  = GeometryParser.calc_arc_length(p=tp, xt=xt, yt=yt, zt=zt)
-            writhing = (
-                GeometryParser.calc_writhing(i=i, t=t, x=x, y=y, z=z)
-                if not rna else 0.0
-            )
-
-            idx = int(tp)
-            residues[idx].curvature = curvature
-            residues[idx].torsion   = torsion
-            residues[idx].arc_len   = arc_len
-            residues[idx].writhing  = writhing
+        geometry = GeometryParser.calc_chain_geometry(coords, breaks, rna)
+        for idx, (curvature, torsion, arc_len, writhing) in enumerate(geometry):
+            residues[idx].curvature = float(curvature)
+            residues[idx].torsion   = float(torsion)
+            residues[idx].arc_len   = float(arc_len)
+            residues[idx].writhing  = float(writhing)
 
         if not rna:
             GeometryParser.calc_dihedral_angles(
-                chain=chain, residues=residues, deg=deg
+                chain=chain, residues=residues, deg=deg, breaks=breaks
             )
 
         return residues, residues_map, rna
@@ -683,19 +799,23 @@ class GeometryParser:
         chain: Chain.Chain,
         residues: Dict[int, ResidueGeometry],
         deg: bool,
+        breaks: Optional[List[int]] = None,
     ) -> None:
         """
         Compute backbone φ/ψ dihedral angles and store them in-place.
 
-        Terminal residues correctly receive None:
-          N-terminus → phi = None
-          C-terminus → psi = None
+        Terminal residues correctly receive None, and so do residues next to
+        a chain break:
+          N-terminus, or first residue after a break → phi = None
+          C-terminus, or last residue before a break → psi = None
 
         :param chain: BioPython Chain
         :param residues: Residue geometry dict (mutated in place)
         :param deg: Store angles in degrees when True
+        :param breaks: Indices where a new segment starts (see find_breaks)
         """
         residues_list = [res for res in chain if res.id[0] == ' ']
+        segment_starts = set(breaks or [])
 
         for i, residue in enumerate(residues_list):
             pos = residue.id[1]
@@ -713,7 +833,7 @@ class GeometryParser:
                 continue
 
             phi: Optional[float] = None
-            if i > 0:
+            if i > 0 and i not in segment_starts:
                 try:
                     p1  = residues_list[i - 1]['C'].get_coord()
                     phi = GeometryParser.calc_dihedral_torsion(
@@ -723,7 +843,7 @@ class GeometryParser:
                     pass
 
             psi: Optional[float] = None
-            if i < len(residues_list) - 1:
+            if i < len(residues_list) - 1 and i + 1 not in segment_starts:
                 try:
                     p4  = residues_list[i + 1]['N'].get_coord()
                     psi = GeometryParser.calc_dihedral_torsion(
