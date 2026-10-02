@@ -93,16 +93,20 @@ def test_numbering_jump_without_missing_residues_is_not_a_break(lines):
 
 
 def test_short_segments_get_nan(lines):
-    # Residues 30-31 (2 residues) and 34-37 (4 residues) between gaps.
+    # Residues 30-31 (2 residues) and 34-37 (4 residues) between gaps: each value
+    # needs its window inside the segment (curvature/torsion/arc length i-1..i+1,
+    # writhing i-2..i+2).
     gapped, _ = geometry(structure(lines, lambda r: r <= 27 or 30 <= r <= 31 or 34 <= r <= 37 or r >= 40))
 
-    two = gapped.loc[30:31]
-    assert two[["curvature", "torsion", "writhing"]].isna().all().all()
-    assert two["arc_length"].notna().all()
+    assert gapped.loc[30:31, GEOMETRY].isna().all().all()
 
     four = gapped.loc[34:37]
-    assert four[["curvature", "torsion", "arc_length"]].notna().all().all()
+    defined = four[["curvature", "torsion", "arc_length"]].notna().all(axis=1)
+    assert defined.tolist() == [False, True, True, False]
     assert four["writhing"].isna().all()
+
+    # the segment ends at the breaks are segment ends like any other
+    assert gapped.loc[[27, 40], ["curvature", "torsion", "arc_length"]].isna().all().all()
 
 
 def test_all_entry_points_agree(lines):

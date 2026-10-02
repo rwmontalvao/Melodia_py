@@ -35,8 +35,11 @@ Correctness
   - Chains are split at breaks (consecutive CA atoms more than 4.2 Å apart)
     and each segment gets its own spline, so no geometry is computed over a
     connection that does not exist; a ChainBreakWarning lists the breaks.
-    phi/psi are None across a break. Values a segment is too short for are
-    NaN (curvature/torsion need 3 residues, writhing 5).
+    phi/psi are None across a break.
+  - Residues at the ends of a chain or segment no longer repeat their
+    neighbour's values: a value is NaN where its window does not fit inside
+    the segment (curvature, torsion and arc length at the first and last
+    residue; writhing at the first two and last two).
 
 Performance
   - calc_writhing inner double loop compiled to native code via Numba @njit.
@@ -90,10 +93,10 @@ _NORM_EPS: float = 1e-10
 # ~3.8 Å, cis ~2.9 Å): the chain is broken there.
 _MAX_CA_CA_DISTANCE: float = 4.2
 
-# Shortest unbroken segment each quantity can be computed on: the Chebyshev
-# window spans 3 residues, the writhing window 5.
-_MIN_CURVATURE_RESIDUES: int = 3
-_MIN_WRITHING_RESIDUES:  int = 5
+# Residues on each side of residue i that a quantity's window needs: the
+# Chebyshev fit and the arc length use [i-1, i+1], writhing [i-2, i+2].
+_CURVATURE_HALF_WINDOW: int = 1
+_WRITHING_HALF_WINDOW:  int = 2
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +314,9 @@ class GeometryParser:
     arc_len     Arc length over a 3-residue window (adaptive quadrature)
     writhing    Gauss writhing number over a 5-residue window (Numba JIT)
     phi / psi   Backbone dihedral angles (protein only; None at termini)
+
+    Chains are split at breaks; at the ends of each chain or segment, values
+    whose window does not fit are NaN (see calc_segment_geometry).
     """
 
     # Supported RNA backbone atoms, in recommended order.
@@ -623,9 +629,14 @@ class GeometryParser:
         Compute curvature, torsion, arc length and writhing for every residue
         of one unbroken segment.
 
-        Values that need more residues than the segment has are NaN:
-        curvature and torsion need _MIN_CURVATURE_RESIDUES, writhing
-        _MIN_WRITHING_RESIDUES, arc length 2. RNA writhing is 0.0.
+        A value is computed only where its whole window lies inside the
+        segment, and is NaN elsewhere: curvature, torsion and arc length use
+        residues i-1 to i+1, so the first and last residue get NaN; writhing
+        uses i-2 to i+2, so the first two and last two get NaN. The residue
+        next to each end is computed but biased by the natural spline's end
+        condition (zero second derivative at the end): on an ideal helix its
+        curvature is ~33% high; from two residues in, the end has no effect.
+        RNA writhing is 0.0.
 
         :param coords: (n, 3) backbone coordinates of the segment
         :param rna: True for an RNA segment
@@ -637,7 +648,7 @@ class GeometryParser:
         geometry = np.full((n, 4), np.nan)
         if rna:
             geometry[:, 3] = 0.0
-        if n < 2:
+        if n <= 2 * _CURVATURE_HALF_WINDOW:
             return geometry
 
         t = list(range(n))
@@ -649,15 +660,16 @@ class GeometryParser:
         y = np.ascontiguousarray(coords[:, 1])
         z = np.ascontiguousarray(coords[:, 2])
 
-        for i in range(n):
-            if n >= _MIN_CURVATURE_RESIDUES:
-                # Terminal residues use the nearest interior point for Chebyshev
-                p_curv = float(min(max(i, 1), n - 2))
-                geometry[i, 0:2] = GeometryParser.calc_curvature_torsion(
-                    p=p_curv, t=t, xt=xt, yt=yt, zt=zt
-                )
+        h = _CURVATURE_HALF_WINDOW
+        for i in range(h, n - h):
+            geometry[i, 0:2] = GeometryParser.calc_curvature_torsion(
+                p=float(i), t=t, xt=xt, yt=yt, zt=zt
+            )
             geometry[i, 2] = GeometryParser.calc_arc_length(p=float(i), xt=xt, yt=yt, zt=zt)
-            if not rna and n >= _MIN_WRITHING_RESIDUES:
+
+        if not rna:
+            h = _WRITHING_HALF_WINDOW
+            for i in range(h, n - h):
                 geometry[i, 3] = _calc_writhing_jit(i, x, y, z, _NORM_EPS)
 
         return geometry
