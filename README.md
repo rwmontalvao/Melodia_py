@@ -58,6 +58,18 @@ and Knot Theory descriptors of protein and RNA structures.
   `NaN` values: residues without a value keep the default B-factor and are left
   out of the clustering, like alignment gaps.
 
+### Packaging
+- **`pip install melodia-py` now gives a working package.** `nglview`,
+  `ipywidgets`, `numba` and `joblib` were imported by `import melodia_py` but
+  not declared as dependencies, so the import failed in a clean environment.
+  `numba` (≥ 0.61, the first release supporting Python 3.13) and `joblib` are
+  now core dependencies. `nglview` and `ipywidgets` are only needed by the
+  structure viewers, which now import them when called; install them with the
+  new `viz` extra (or from conda-forge):
+  ```shell
+  pip install "melodia-py[viz]"
+  ```
+
 ### Tests
 - A `tests/` suite covers these fixes (constant values along an ideal helix,
   independence from residue numbering, chain breaks, chain ends, `NaN`
@@ -169,14 +181,17 @@ pip install melodia-py
 
 | Extra | Installs | Enables |
 |---|---|---|
-| `fast` | numba, llvmlite | JIT-compiled writhing (~8× faster) |
-| `parallel` | joblib | Multi-core model processing |
+| `viz` | nglview, ipywidgets | `view_putty()`, `view_cartoon()`, `view_tube()` in notebooks |
 | `mdanalysis` | MDAnalysis | `geometry_from_mdanalysis()` for MD trajectories |
 | `dev` | pytest, mypy, ruff, pre-commit | Development tools |
 | `all` | all of the above | Everything |
 
+Numba (JIT-compiled writhing) and joblib (multi-core model processing) are
+installed with the core package. The former `fast` and `parallel` extras still
+work but add nothing.
+
 ```shell
-pip install "melodia-py[fast,parallel]"
+pip install "melodia-py[viz]"
 ```
 
 ### From source (recommended for development)

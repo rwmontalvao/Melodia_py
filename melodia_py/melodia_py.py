@@ -15,14 +15,12 @@
 # Author: Rinaldo Wander Montalvão, PhD
 #
 import os
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
 
 import Bio.Align
 import pandas as pd
-import nglview as nv
 import seaborn as sns
 
-from ipywidgets import Box
 from Bio import AlignIO
 from Bio.PDB import PDBParser
 from Bio.PDB.Structure import Structure
@@ -33,6 +31,10 @@ from melodia_py.geometryparser import GeometryParser, _defined, _warn_breaks
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering
 from importlib import resources as importlib_resources
+
+if TYPE_CHECKING:
+    # Optional (melodia-py[viz]); imported by the viewers when called.
+    from ipywidgets import Box
 
 
 # ---------------------------------------------------------------------------
@@ -735,7 +737,17 @@ def bfactor_from_geo(
 # NGL viewers
 # ---------------------------------------------------------------------------
 
-def _make_view(structure: Structure, representation: dict, width: int, height: int) -> Box:
+def _make_view(structure: Structure, representation: dict, width: int, height: int) -> 'Box':
+    try:
+        import nglview as nv
+        from ipywidgets import Box
+    except ImportError as exc:
+        raise ImportError(
+            "nglview and ipywidgets are required for the structure viewers. "
+            'Install them with:  pip install "melodia-py[viz]"  '
+            "(or conda install -c conda-forge nglview)"
+        ) from exc
+
     view = nv.show_biopython(structure)
     view.representations = [representation]
     view.layout.width = '100%'
@@ -746,7 +758,7 @@ def _make_view(structure: Structure, representation: dict, width: int, height: i
     return box
 
 
-def view_putty(structure: Structure, radius_scale: float = 1.0, width: int = 1200, height: int = 600) -> Box:
+def view_putty(structure: Structure, radius_scale: float = 1.0, width: int = 1200, height: int = 600) -> 'Box':
     """Display PDB structure as a putty (tube-radius-by-bfactor) model."""
     return _make_view(structure, {
         'type': 'tube',
@@ -760,7 +772,7 @@ def view_putty(structure: Structure, radius_scale: float = 1.0, width: int = 120
     }, width, height)
 
 
-def view_cartoon(structure: Structure, width: int = 1200, height: int = 600) -> Box:
+def view_cartoon(structure: Structure, width: int = 1200, height: int = 600) -> 'Box':
     """Display PDB structure as a cartoon coloured by B-factor."""
     return _make_view(structure, {
         'type': 'cartoon',
@@ -768,7 +780,7 @@ def view_cartoon(structure: Structure, width: int = 1200, height: int = 600) -> 
     }, width, height)
 
 
-def view_tube(structure: Structure, width: int = 1200, height: int = 600) -> Box:
+def view_tube(structure: Structure, width: int = 1200, height: int = 600) -> 'Box':
     """Display PDB structure as a tube coloured by B-factor."""
     return _make_view(structure, {
         'type': 'tube',
