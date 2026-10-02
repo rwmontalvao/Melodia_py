@@ -212,6 +212,14 @@ def _warmup_jit() -> None:
 _warmup_jit()
 
 
+def _defined(*values: Optional[float]) -> bool:
+    """
+    True if every value is a number: not None (alignment gap) and not NaN
+    (residue too close to a chain end or break for that quantity).
+    """
+    return all(v is not None and not math.isnan(v) for v in values)
+
+
 # ---------------------------------------------------------------------------
 # Chain breaks
 # ---------------------------------------------------------------------------

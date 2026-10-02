@@ -28,7 +28,7 @@ from Bio.PDB import PDBParser
 from Bio.PDB.Structure import Structure
 from joblib import Parallel, delayed
 
-from melodia_py.geometryparser import GeometryParser, _warn_breaks
+from melodia_py.geometryparser import GeometryParser, _defined, _warn_breaks
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering
@@ -703,12 +703,14 @@ def bfactor_from_geo(
             return res.custom
         return 0.0
 
-    # Determine global minimum for default fill
-    min_value = min(
+    # Determine global minimum for default fill. Residues too close to a
+    # chain end or break for the value (NaN) keep the fill value.
+    values = [
         _get_val(gp, res_idx)
         for gp in geo.values()
         for res_idx in gp.residues
-    ) if attribute in ('curvature', 'torsion', 'custom') else 0.0
+    ] if attribute in ('curvature', 'torsion', 'custom') else []
+    min_value = min((v for v in values if _defined(v)), default=0.0)
 
     for atom in structure.get_atoms():
         if atom.is_disordered():
@@ -724,7 +726,9 @@ def bfactor_from_geo(
                 if het_flag[0] == ' ':
                     key = f'{model.id}:{chain.id}'
                     res_idx = geo[key].residues_map[sequence_id]
-                    atom.set_bfactor(_get_val(geo[key], res_idx))
+                    value = _get_val(geo[key], res_idx)
+                    if _defined(value):
+                        atom.set_bfactor(value)
 
 
 # ---------------------------------------------------------------------------
@@ -1032,11 +1036,12 @@ def cluster_alignment(
         xy: List[List[float]] = []
         tags: List[str] = []
         for rec_id, record in structure_records.items():
-            if record.seq[i] != '-':
-                xy.append([
-                    record.letter_annotations['curvature'][i],
-                    record.letter_annotations['torsion'][i],
-                ])
+            curv = record.letter_annotations['curvature'][i]
+            tors = record.letter_annotations['torsion'][i]
+            # Gaps, and residues too close to a chain end or break for
+            # curvature/torsion (NaN), are left out like gaps.
+            if record.seq[i] != '-' and _defined(curv, tors):
+                xy.append([curv, tors])
                 tags.append(rec_id)
 
         if len(xy) > 1:

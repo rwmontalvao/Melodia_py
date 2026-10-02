@@ -31,6 +31,8 @@ from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering
 
+from melodia_py.geometryparser import _defined
+
 warnings.filterwarnings('ignore', category=PDBConstructionWarning)
 
 # ---------------------------------------------------------------------------
@@ -292,11 +294,12 @@ def superimposer(
         tags: List[str] = []
         for rec_id, position in id2pos.items():
             record = align[position]
-            if record.seq[i] != '-':
-                xy.append([
-                    record.letter_annotations['curvature'][i],
-                    record.letter_annotations['torsion'][i],
-                ])
+            curv = record.letter_annotations['curvature'][i]
+            tors = record.letter_annotations['torsion'][i]
+            # Gaps, and residues too close to a chain end or break for
+            # curvature/torsion (NaN), are left out like gaps.
+            if record.seq[i] != '-' and _defined(curv, tors):
+                xy.append([curv, tors])
                 tags.append(rec_id)
 
         if len(xy) > 1:
