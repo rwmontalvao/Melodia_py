@@ -55,8 +55,9 @@ and Knot Theory descriptors of protein and RNA structures.
   df = df.dropna(subset=["curvature", "torsion"])
   ```
 - `bfactor_from_geo`, `cluster_alignment` and `clustering.superimposer` accept
-  `NaN` values: residues without a value keep the default B-factor and are left
-  out of the clustering, like alignment gaps.
+  `NaN` values: residues without a value keep the default B-factor, are left out
+  of the clustering and get the cluster label `-1`, so they never form or join
+  a conserved block.
 
 ### Packaging
 - **`pip install melodia-py` now gives a working package.** `nglview`,

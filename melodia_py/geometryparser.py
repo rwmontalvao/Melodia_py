@@ -223,6 +223,11 @@ def _defined(*values: Optional[float]) -> bool:
     return all(v is not None and not math.isnan(v) for v in values)
 
 
+# Cluster label of a residue with NaN curvature/torsion in a clustered
+# alignment. Gaps keep label 0; this label never joins a conserved block.
+_UNCLUSTERED = -1
+
+
 # ---------------------------------------------------------------------------
 # Chain breaks
 # ---------------------------------------------------------------------------

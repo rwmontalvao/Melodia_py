@@ -1,8 +1,8 @@
 """Functions that use curvature and torsion accept residues where they are NaN.
 
-Residues in segments too short for a quantity (between chain breaks) get NaN;
-the B-factor mapping and the alignment clustering must treat them like
-residues with no value, not fail or propagate NaN.
+Residues next to a chain end or break get NaN; the B-factor mapping and the
+alignment clustering must treat them as residues with no value, not fail,
+propagate NaN, or count them as conserved.
 """
 
 import io
@@ -69,3 +69,23 @@ def test_cluster_alignment_skips_nan_residues(monkeypatch):
     for clustered in align:
         if clustered.description.startswith("structure"):
             assert len(clustered.letter_annotations["cluster"]) == len(clustered.seq)
+
+
+@pytest.mark.parametrize("long", [False, True])
+def test_cluster_alignment_leaves_nan_residues_unclustered(monkeypatch, long):
+    monkeypatch.chdir(EXAMPLES)
+    align = mel.parser_pir_file("model.ali")
+    mel.cluster_alignment(align, threshold=1.1, long=long)
+
+    structures = [r for r in align if r.description.startswith("structure")]
+    for record in structures:
+        cluster = record.letter_annotations["cluster"]
+        curvature = record.letter_annotations["curvature"]
+        for i, letter in enumerate(record.seq):
+            if letter != "-" and math.isnan(curvature[i]):
+                assert cluster[i] == -1
+
+    # Column 0 has no value (NaN or gap) in any structure; it must not make
+    # the first residues look like a conserved block.
+    if long:
+        assert all(record.letter_annotations["cluster"][2] == -1 for record in structures)

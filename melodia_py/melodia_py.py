@@ -26,7 +26,7 @@ from Bio.PDB import PDBParser
 from Bio.PDB.Structure import Structure
 from joblib import Parallel, delayed
 
-from melodia_py.geometryparser import GeometryParser, _defined, _warn_breaks
+from melodia_py.geometryparser import GeometryParser, _UNCLUSTERED, _defined, _warn_breaks
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering
@@ -1017,6 +1017,8 @@ def cluster_alignment(
     """
     Cluster alignment positions by structural similarity in (curvature, torsion)
     space and annotate each structure record with a 'cluster' letter_annotation.
+    Residues with NaN curvature or torsion (next to a chain end or break) get
+    -1, like clusters removed by *long*, and never join a cluster.
 
     :param align: Annotated MultipleSeqAlignment (mutated in place)
     :param threshold: Agglomerative clustering distance threshold
@@ -1050,11 +1052,15 @@ def cluster_alignment(
         for rec_id, record in structure_records.items():
             curv = record.letter_annotations['curvature'][i]
             tors = record.letter_annotations['torsion'][i]
-            # Gaps, and residues too close to a chain end or break for
-            # curvature/torsion (NaN), are left out like gaps.
-            if record.seq[i] != '-' and _defined(curv, tors):
+            # Residues too close to a chain end or break for curvature/torsion
+            # (NaN) are left out of the clustering and marked unclustered.
+            if record.seq[i] == '-':
+                continue
+            if _defined(curv, tors):
                 xy.append([curv, tors])
                 tags.append(rec_id)
+            else:
+                record.letter_annotations['cluster'][i] = _UNCLUSTERED
 
         if len(xy) > 1:
             clusters = clustering.fit_predict(scaler.transform(xy))
@@ -1062,9 +1068,6 @@ def cluster_alignment(
             for rec_id, record in structure_records.items():
                 if rec_id in cluster_map:
                     record.letter_annotations['cluster'][i] = cluster_map[rec_id]
-        else:
-            for record in structure_records.values():
-                record.letter_annotations['cluster'][i] = 0
 
     # Propagate consistent cluster labels across adjacent columns
     last_cluster = max(
@@ -1082,8 +1085,11 @@ def cluster_alignment(
                 continue
             ca = record.letter_annotations['cluster'][i]
             cb = record.letter_annotations['cluster'][j]
-            left.setdefault(ca, set()).add(k)
-            right.setdefault(cb, set()).add(k)
+            # Unclustered residues keep their label and match nothing
+            if ca != _UNCLUSTERED:
+                left.setdefault(ca, set()).add(k)
+            if cb != _UNCLUSTERED:
+                right.setdefault(cb, set()).add(k)
 
         for right_key, right_members in right.items():
             found_key = next(
@@ -1103,6 +1109,8 @@ def cluster_alignment(
         last_cluster = 0
         for j in idx:
             cluster, ini, end, size = data[j]
+            if cluster == _UNCLUSTERED:
+                continue
             new_label = -1 if size < 3 else last_cluster
             for i in range(ini, end + 1):
                 for record in align:
