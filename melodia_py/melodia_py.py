@@ -15,24 +15,26 @@
 # Author: Rinaldo Wander Montalvão, PhD
 #
 import os
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
 
 import Bio.Align
 import pandas as pd
-import nglview as nv
 import seaborn as sns
 
-from ipywidgets import Box
 from Bio import AlignIO
 from Bio.PDB import PDBParser
 from Bio.PDB.Structure import Structure
 from joblib import Parallel, delayed
 
-from melodia_py.geometryparser import GeometryParser
+from melodia_py.geometryparser import GeometryParser, _UNCLUSTERED, _defined, _warn_breaks
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering
 from importlib import resources as importlib_resources
+
+if TYPE_CHECKING:
+    # Optional (melodia-py[viz]); imported by the viewers when called.
+    from ipywidgets import Box
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +174,8 @@ def geometry_from_mdanalysis(
     if not tasks:
         return pd.DataFrame()
 
+    _warn_breaks(_task_breaks(tasks))
+
     nested: List[List[dict]] = Parallel(n_jobs=n_jobs)(
         delayed(_compute_model_geometry)(task, deg)
         for task in tasks
@@ -293,6 +297,7 @@ def _extract_mda_frame_data(
             'coords':       coords,
             'residue_meta': residue_meta,
             'backbone':     backbone,
+            'breaks':       [] if rna else GeometryParser.find_breaks(coords),
         })
 
     if not chain_data:
@@ -378,6 +383,7 @@ def _extract_model_data(
             'coords':       coords,
             'residue_meta': residue_meta,
             'backbone':     backbone,
+            'breaks':       [] if rna else GeometryParser.find_breaks(coords),
         })
 
     if not chain_data:
@@ -388,6 +394,20 @@ def _extract_model_data(
         'pdb_code':  pdb_code,
         'chains':    chain_data,
     }
+
+
+def _task_breaks(tasks: List[dict]) -> List[Tuple[str, int, int, Any]]:
+    """
+    Chain breaks recorded by the extractors, as (chain_id, residue before,
+    residue after, model id) tuples for _warn_breaks.
+    """
+    return [
+        (chain['chain_id'], chain['residue_meta'][i - 1][1],
+         chain['residue_meta'][i][1], task['model_id'])
+        for task in tasks
+        for chain in task['chains']
+        for i in chain['breaks']
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -406,10 +426,7 @@ def _compute_model_geometry(task: dict, deg: bool) -> List[dict]:
     :return: Flat list of per-residue record dicts for all chains
     """
     import numpy as np
-    from scipy.interpolate import CubicSpline
-    from melodia_py.geometryparser import (
-        GeometryParser, _NORM_EPS, _calc_writhing_jit,
-    )
+    from melodia_py.geometryparser import GeometryParser
 
     model_id = task['model_id']
     pdb_code = task['pdb_code']
@@ -421,34 +438,14 @@ def _compute_model_geometry(task: dict, deg: bool) -> List[dict]:
         coords       = chain['coords']
         residue_meta = chain['residue_meta']
         backbone     = chain['backbone']
+        breaks       = chain['breaks']
 
         n_res = len(coords)
-        t = list(range(n_res))
-        x = [c[0] for c in coords]
-        y = [c[1] for c in coords]
-        z = [c[2] for c in coords]
-
-        xt = CubicSpline(t, x, bc_type='natural')
-        yt = CubicSpline(t, y, bc_type='natural')
-        zt = CubicSpline(t, z, bc_type='natural')
-
-        xa = np.ascontiguousarray(x, dtype=np.float64)
-        ya = np.ascontiguousarray(y, dtype=np.float64)
-        za = np.ascontiguousarray(z, dtype=np.float64)
-
-        ini, end = 0, n_res - 1
+        segment_starts = set(breaks)
+        geometry = GeometryParser.calc_chain_geometry(coords, breaks, rna)
 
         for i, (resname, pos) in enumerate(residue_meta):
-            p_curv = float(t[1]) if i == ini else (float(t[-2]) if i == end else float(i))
-
-            curvature, torsion = GeometryParser.calc_curvature_torsion(
-                p=p_curv, t=t, xt=xt, yt=yt, zt=zt
-            )
-            arc_len  = GeometryParser.calc_arc_length(p=float(i), xt=xt, yt=yt, zt=zt)
-            writhing = (
-                float(_calc_writhing_jit(i, xa, ya, za, _NORM_EPS))
-                if not rna else 0.0
-            )
+            curvature, torsion, arc_len, writhing = (float(v) for v in geometry[i])
 
             row: dict = {
                 'id':         i,
@@ -473,12 +470,13 @@ def _compute_model_geometry(task: dict, deg: bool) -> List[dict]:
                     ca_coord = np.array(bb[1])
                     c_coord  = np.array(bb[2])
 
-                    if i > 0 and backbone[i - 1] is not None:
+                    if i > 0 and i not in segment_starts and backbone[i - 1] is not None:
                         prev_c = np.array(backbone[i - 1][2])
                         phi = GeometryParser.calc_dihedral_torsion(
                             p1=prev_c, p2=n_coord, p3=ca_coord, p4=c_coord, deg=deg
                         )
-                    if i < n_res - 1 and backbone[i + 1] is not None:
+                    if (i < n_res - 1 and i + 1 not in segment_starts
+                            and backbone[i + 1] is not None):
                         next_n = np.array(backbone[i + 1][0])
                         psi = GeometryParser.calc_dihedral_torsion(
                             p1=n_coord, p2=ca_coord, p3=c_coord, p4=next_n, deg=deg
@@ -534,6 +532,8 @@ def proc_chains(
     if not tasks:
         return pd.DataFrame()
 
+    _warn_breaks(_task_breaks(tasks))
+
     # Dispatch one task per model to the loky worker pool.
     # Each worker processes all chains of its model sequentially.
     nested: List[List[dict]] = Parallel(n_jobs=n_jobs)(
@@ -553,10 +553,7 @@ def _compute_model_gp(task: dict, deg: bool) -> List[Tuple[str, dict]]:
     Receives only plain dicts — no BioPython objects.
     """
     import numpy as np
-    from scipy.interpolate import CubicSpline
-    from melodia_py.geometryparser import (
-        GeometryParser, ResidueGeometry, _NORM_EPS, _calc_writhing_jit,
-    )
+    from melodia_py.geometryparser import GeometryParser, ResidueGeometry
 
     model_id = task['model_id']
     results  = []
@@ -567,36 +564,16 @@ def _compute_model_gp(task: dict, deg: bool) -> List[Tuple[str, dict]]:
         coords       = chain['coords']
         residue_meta = chain['residue_meta']
         backbone     = chain['backbone']
+        breaks       = chain['breaks']
 
         n_res = len(coords)
-        t = list(range(n_res))
-        x = [c[0] for c in coords]
-        y = [c[1] for c in coords]
-        z = [c[2] for c in coords]
-
-        xt = CubicSpline(t, x, bc_type='natural')
-        yt = CubicSpline(t, y, bc_type='natural')
-        zt = CubicSpline(t, z, bc_type='natural')
-
-        xa = np.ascontiguousarray(x, dtype=np.float64)
-        ya = np.ascontiguousarray(y, dtype=np.float64)
-        za = np.ascontiguousarray(z, dtype=np.float64)
-
-        ini, end = 0, n_res - 1
+        segment_starts = set(breaks)
+        geometry = GeometryParser.calc_chain_geometry(coords, breaks, rna)
         residues:     dict = {}
         residues_map: dict = {}
 
         for i, (resname, pos) in enumerate(residue_meta):
-            p_curv = float(t[1]) if i == ini else (float(t[-2]) if i == end else float(i))
-
-            curvature, torsion = GeometryParser.calc_curvature_torsion(
-                p=p_curv, t=t, xt=xt, yt=yt, zt=zt
-            )
-            arc_len  = GeometryParser.calc_arc_length(p=float(i), xt=xt, yt=yt, zt=zt)
-            writhing = (
-                float(_calc_writhing_jit(i, xa, ya, za, _NORM_EPS))
-                if not rna else 0.0
-            )
+            curvature, torsion, arc_len, writhing = (float(v) for v in geometry[i])
 
             rg = ResidueGeometry(
                 name=resname,
@@ -615,12 +592,13 @@ def _compute_model_gp(task: dict, deg: bool) -> List[Tuple[str, dict]]:
                     n_coord  = np.array(bb[0])
                     ca_coord = np.array(bb[1])
                     c_coord  = np.array(bb[2])
-                    if i > 0 and backbone[i - 1] is not None:
+                    if i > 0 and i not in segment_starts and backbone[i - 1] is not None:
                         prev_c = np.array(backbone[i - 1][2])
                         rg.phi = GeometryParser.calc_dihedral_torsion(
                             p1=prev_c, p2=n_coord, p3=ca_coord, p4=c_coord, deg=deg
                         )
-                    if i < n_res - 1 and backbone[i + 1] is not None:
+                    if (i < n_res - 1 and i + 1 not in segment_starts
+                            and backbone[i + 1] is not None):
                         next_n = np.array(backbone[i + 1][0])
                         rg.psi = GeometryParser.calc_dihedral_torsion(
                             p1=n_coord, p2=ca_coord, p3=c_coord, p4=next_n, deg=deg
@@ -665,6 +643,8 @@ def geometry_dict_from_structure(
 
     if not tasks:
         return {}
+
+    _warn_breaks(_task_breaks(tasks))
 
     # Dispatch to workers — one task per model
     nested: List[List[tuple]] = Parallel(n_jobs=n_jobs)(
@@ -725,12 +705,14 @@ def bfactor_from_geo(
             return res.custom
         return 0.0
 
-    # Determine global minimum for default fill
-    min_value = min(
+    # Determine global minimum for default fill. Residues too close to a
+    # chain end or break for the value (NaN) keep the fill value.
+    values = [
         _get_val(gp, res_idx)
         for gp in geo.values()
         for res_idx in gp.residues
-    ) if attribute in ('curvature', 'torsion', 'custom') else 0.0
+    ] if attribute in ('curvature', 'torsion', 'custom') else []
+    min_value = min((v for v in values if _defined(v)), default=0.0)
 
     for atom in structure.get_atoms():
         if atom.is_disordered():
@@ -746,14 +728,26 @@ def bfactor_from_geo(
                 if het_flag[0] == ' ':
                     key = f'{model.id}:{chain.id}'
                     res_idx = geo[key].residues_map[sequence_id]
-                    atom.set_bfactor(_get_val(geo[key], res_idx))
+                    value = _get_val(geo[key], res_idx)
+                    if _defined(value):
+                        atom.set_bfactor(value)
 
 
 # ---------------------------------------------------------------------------
 # NGL viewers
 # ---------------------------------------------------------------------------
 
-def _make_view(structure: Structure, representation: dict, width: int, height: int) -> Box:
+def _make_view(structure: Structure, representation: dict, width: int, height: int) -> 'Box':
+    try:
+        import nglview as nv
+        from ipywidgets import Box
+    except ImportError as exc:
+        raise ImportError(
+            "nglview and ipywidgets are required for the structure viewers. "
+            'Install them with:  pip install "melodia-py[viz]"  '
+            "(or conda install -c conda-forge nglview)"
+        ) from exc
+
     view = nv.show_biopython(structure)
     view.representations = [representation]
     view.layout.width = '100%'
@@ -764,7 +758,7 @@ def _make_view(structure: Structure, representation: dict, width: int, height: i
     return box
 
 
-def view_putty(structure: Structure, radius_scale: float = 1.0, width: int = 1200, height: int = 600) -> Box:
+def view_putty(structure: Structure, radius_scale: float = 1.0, width: int = 1200, height: int = 600) -> 'Box':
     """Display PDB structure as a putty (tube-radius-by-bfactor) model."""
     return _make_view(structure, {
         'type': 'tube',
@@ -778,7 +772,7 @@ def view_putty(structure: Structure, radius_scale: float = 1.0, width: int = 120
     }, width, height)
 
 
-def view_cartoon(structure: Structure, width: int = 1200, height: int = 600) -> Box:
+def view_cartoon(structure: Structure, width: int = 1200, height: int = 600) -> 'Box':
     """Display PDB structure as a cartoon coloured by B-factor."""
     return _make_view(structure, {
         'type': 'cartoon',
@@ -786,7 +780,7 @@ def view_cartoon(structure: Structure, width: int = 1200, height: int = 600) -> 
     }, width, height)
 
 
-def view_tube(structure: Structure, width: int = 1200, height: int = 600) -> Box:
+def view_tube(structure: Structure, width: int = 1200, height: int = 600) -> 'Box':
     """Display PDB structure as a tube coloured by B-factor."""
     return _make_view(structure, {
         'type': 'tube',
@@ -1023,6 +1017,8 @@ def cluster_alignment(
     """
     Cluster alignment positions by structural similarity in (curvature, torsion)
     space and annotate each structure record with a 'cluster' letter_annotation.
+    Residues with NaN curvature or torsion (next to a chain end or break) get
+    -1, like clusters removed by *long*, and never join a cluster.
 
     :param align: Annotated MultipleSeqAlignment (mutated in place)
     :param threshold: Agglomerative clustering distance threshold
@@ -1054,12 +1050,17 @@ def cluster_alignment(
         xy: List[List[float]] = []
         tags: List[str] = []
         for rec_id, record in structure_records.items():
-            if record.seq[i] != '-':
-                xy.append([
-                    record.letter_annotations['curvature'][i],
-                    record.letter_annotations['torsion'][i],
-                ])
+            curv = record.letter_annotations['curvature'][i]
+            tors = record.letter_annotations['torsion'][i]
+            # Residues too close to a chain end or break for curvature/torsion
+            # (NaN) are left out of the clustering and marked unclustered.
+            if record.seq[i] == '-':
+                continue
+            if _defined(curv, tors):
+                xy.append([curv, tors])
                 tags.append(rec_id)
+            else:
+                record.letter_annotations['cluster'][i] = _UNCLUSTERED
 
         if len(xy) > 1:
             clusters = clustering.fit_predict(scaler.transform(xy))
@@ -1067,9 +1068,6 @@ def cluster_alignment(
             for rec_id, record in structure_records.items():
                 if rec_id in cluster_map:
                     record.letter_annotations['cluster'][i] = cluster_map[rec_id]
-        else:
-            for record in structure_records.values():
-                record.letter_annotations['cluster'][i] = 0
 
     # Propagate consistent cluster labels across adjacent columns
     last_cluster = max(
@@ -1087,8 +1085,11 @@ def cluster_alignment(
                 continue
             ca = record.letter_annotations['cluster'][i]
             cb = record.letter_annotations['cluster'][j]
-            left.setdefault(ca, set()).add(k)
-            right.setdefault(cb, set()).add(k)
+            # Unclustered residues keep their label and match nothing
+            if ca != _UNCLUSTERED:
+                left.setdefault(ca, set()).add(k)
+            if cb != _UNCLUSTERED:
+                right.setdefault(cb, set()).add(k)
 
         for right_key, right_members in right.items():
             found_key = next(
@@ -1108,6 +1109,8 @@ def cluster_alignment(
         last_cluster = 0
         for j in idx:
             cluster, ini, end, size = data[j]
+            if cluster == _UNCLUSTERED:
+                continue
             new_label = -1 if size < 3 else last_cluster
             for i in range(ini, end + 1):
                 for record in align:

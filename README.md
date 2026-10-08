@@ -8,6 +8,79 @@ and Knot Theory descriptors of protein and RNA structures.
 
 ---
 
+## What's new (unreleased)
+
+> **Results change.** Curvature and torsion change for every residue past the
+> first ~10 of each chain, and values near chain ends and breaks are now NaN.
+> Results from v0.1.8 and earlier are not comparable with results from this
+> version.
+
+### Correctness fixes
+- **Curvature and torsion no longer depend on the residue's position in the
+  chain.** The local Chebyshev fit in `calc_curvature_torsion` was done on the
+  raw curve parameter (the residue index). Past ~10 residues the fit lost rank
+  without warning, so values depended on where a residue sat in the chain, not
+  only on its local geometry: on an ideal α-helix, interior curvature ranged
+  0.35–0.51 instead of a constant 0.514. Each fitting window is now mapped to
+  [−1, 1], and the fit has full rank for any chain length.
+- **Chains are split at breaks.** A break is two consecutive Cα atoms more than
+  4.2 Å apart (missing residues, or residues dropped for a missing Cα). Each
+  segment gets its own spline, so no geometry is computed over a connection
+  that does not exist, and φ/ψ are `None` across the break. A single
+  `ChainBreakWarning` lists the breaks found:
+  ```python
+  import warnings
+  from melodia_py.geometryparser import ChainBreakWarning
+
+  with warnings.catch_warnings():
+      warnings.simplefilter("ignore", ChainBreakWarning)   # or "error"
+      df = mel.geometry_from_structure_file("structure.pdb")
+  ```
+  Breaks are detected from distances, not residue numbering, so a numbering
+  jump between bonded residues is not a break. RNA chains are not split yet.
+- **No more copied values at chain ends.** The first and last residue used to
+  repeat their neighbour's curvature and torsion, and the first and last three
+  residues shared one writhing value. A value is now computed only where its
+  whole window lies inside the chain or segment, and is `NaN` elsewhere:
+
+  | Quantity | Window | `NaN` at |
+  |---|---|---|
+  | curvature, torsion, arc_length | residues i−1 to i+1 | first and last residue |
+  | writhing | residues i−2 to i+2 | first two and last two residues |
+
+  The residue next to each end is computed, but is biased by the spline's end
+  condition (33% high on an ideal helix); from two residues in, the end has no
+  effect. Drop the `NaN` rows where a complete table is needed:
+  ```python
+  df = df.dropna(subset=["curvature", "torsion"])
+  ```
+- `bfactor_from_geo`, `cluster_alignment` and `clustering.superimposer` accept
+  `NaN` values: residues without a value keep the default B-factor, are left out
+  of the clustering and get the cluster label `-1`, so they never form or join
+  a conserved block.
+
+### Packaging
+- **`pip install melodia-py` now gives a working package.** `nglview`,
+  `ipywidgets`, `numba` and `joblib` were imported by `import melodia_py` but
+  not declared as dependencies, so the import failed in a clean environment.
+  `numba` (≥ 0.61, the first release supporting Python 3.13) and `joblib` are
+  now core dependencies. `nglview` and `ipywidgets` are only needed by the
+  structure viewers, which now import them when called; install them with the
+  new `viz` extra (or from conda-forge):
+  ```shell
+  pip install "melodia-py[viz]"
+  ```
+
+### Tests
+- A `tests/` suite covers these fixes (constant values along an ideal helix,
+  independence from residue numbering, chain breaks, chain ends, `NaN`
+  handling). Run it from a source install (see *From source* below):
+  ```shell
+  pytest
+  ```
+
+---
+
 ## What's new in v0.1.8
 
 ### MDAnalysis integration
@@ -109,14 +182,17 @@ pip install melodia-py
 
 | Extra | Installs | Enables |
 |---|---|---|
-| `fast` | numba, llvmlite | JIT-compiled writhing (~8× faster) |
-| `parallel` | joblib | Multi-core model processing |
+| `viz` | nglview, ipywidgets | `view_putty()`, `view_cartoon()`, `view_tube()` in notebooks |
 | `mdanalysis` | MDAnalysis | `geometry_from_mdanalysis()` for MD trajectories |
 | `dev` | pytest, mypy, ruff, pre-commit | Development tools |
 | `all` | all of the above | Everything |
 
+Numba (JIT-compiled writhing) and joblib (multi-core model processing) are
+installed with the core package. The former `fast` and `parallel` extras still
+work but add nothing.
+
 ```shell
-pip install "melodia-py[fast,parallel]"
+pip install "melodia-py[viz]"
 ```
 
 ### From source (recommended for development)

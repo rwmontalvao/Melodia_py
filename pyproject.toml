@@ -59,32 +59,41 @@ dependencies = [
     "sty>=1.0",          # terminal colour output in show_align()
     "importlib_resources>=6.4",
     "dill>=0.4",
+    # Imported by the geometry code on every import of melodia_py:
+    "numba>=0.61",       # JIT writhing kernel; 0.61 is the first with Python 3.13
+    "joblib>=1.4",       # parallel processing across models (n_jobs)
 ]
 
 # ---------------------------------------------------------------------------
 # Optional dependency groups
 #
 # Install with:
-#   pip install melodia-py[fast]          # Numba JIT writhing
-#   pip install melodia-py[parallel]      # joblib batch processing
+#   pip install melodia-py[viz]           # NGLView structure viewers (notebooks)
 #   pip install melodia-py[mdanalysis]    # MDAnalysis trajectory support
 #   pip install melodia-py[dev]           # testing + linting tools
 #   pip install melodia-py[all]           # everything above
+#
+# fast and parallel are kept so existing install commands keep working;
+# numba and joblib are now core dependencies.
 # ---------------------------------------------------------------------------
 
 [project.optional-dependencies]
 
 fast = [
-    # Numba JIT compilation for calc_writhing_jit().
-    # Note: install melodia-py as a wheel (pip install .), NOT as an egg,
-    # so that Numba's cache locator can find the source file on disk.
-    "numba>=0.59",
-    "llvmlite>=0.42",    # pinned transitively by numba; listed explicitly
+    # Now a core dependency; kept for compatibility.
+    "numba>=0.61",
 ]
 
 parallel = [
-    # joblib parallel batch processing via parse_structures().
+    # Now a core dependency; kept for compatibility.
     "joblib>=1.4",
+]
+
+viz = [
+    # view_putty(), view_cartoon(), view_tube() in Jupyter notebooks.
+    # NGLView can be hard to install with pip; conda-forge works well.
+    "nglview>=3.1",
+    "ipywidgets>=8.1",
 ]
 
 mdanalysis = [
@@ -104,8 +113,7 @@ dev = [
 ]
 
 all = [
-    "melodia-py[fast]",
-    "melodia-py[parallel]",
+    "melodia-py[viz]",
     "melodia-py[mdanalysis]",
     "melodia-py[dev]",
 ]

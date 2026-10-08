@@ -31,6 +31,8 @@ from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import AgglomerativeClustering
 
+from melodia_py.geometryparser import _UNCLUSTERED, _defined
+
 warnings.filterwarnings('ignore', category=PDBConstructionWarning)
 
 # ---------------------------------------------------------------------------
@@ -246,7 +248,8 @@ def superimposer(
     Conserved anchor regions are identified by agglomerative clustering on
     (curvature, torsion) pairs, then refined by simulated annealing to
     minimise the inter-structure RMSD. Optionally writes CSV coordinate files
-    and superimposed PDB files.
+    and superimposed PDB files. A column with a residue whose curvature or
+    torsion is NaN (next to a chain end or break) is never conserved.
 
     :param align: Geometry-annotated MultipleSeqAlignment
     :param threshold: Agglomerative clustering distance threshold
@@ -292,12 +295,17 @@ def superimposer(
         tags: List[str] = []
         for rec_id, position in id2pos.items():
             record = align[position]
-            if record.seq[i] != '-':
-                xy.append([
-                    record.letter_annotations['curvature'][i],
-                    record.letter_annotations['torsion'][i],
-                ])
+            curv = record.letter_annotations['curvature'][i]
+            tors = record.letter_annotations['torsion'][i]
+            # Residues too close to a chain end or break for curvature/torsion
+            # (NaN) are left out of the clustering and marked unclustered.
+            if record.seq[i] == '-':
+                continue
+            if _defined(curv, tors):
+                xy.append([curv, tors])
                 tags.append(rec_id)
+            else:
+                record.letter_annotations['cluster'][i] = _UNCLUSTERED
 
         if len(xy) > 1:
             clusters = clustering.fit_predict(scaler.transform(xy))
@@ -306,18 +314,18 @@ def superimposer(
                 record = align[position]
                 if rec_id in cluster_map:
                     record.letter_annotations['cluster'][i] = cluster_map[rec_id]
-        else:
-            for position in id2pos.values():
-                align[position].letter_annotations['cluster'][i] = 0
 
     # ------------------------------------------------------------------
     # Identify fully conserved columns (all structures in same cluster)
     # ------------------------------------------------------------------
     align_len = align.get_alignment_length()
-    area = [
-        1 if len({align[pos].letter_annotations['cluster'][i] for pos in id2pos.values()}) == 1
-        else 0
+    column_labels = [
+        {align[pos].letter_annotations['cluster'][i] for pos in id2pos.values()}
         for i in range(align_len)
+    ]
+    area = [
+        1 if len(labels) == 1 and _UNCLUSTERED not in labels else 0
+        for labels in column_labels
     ]
 
     # ------------------------------------------------------------------
