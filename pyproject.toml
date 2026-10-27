@@ -1,5 +1,4 @@
 # pyproject.toml — melodia_py
-# Replace every <PLACEHOLDER> before publishing to PyPI.
 
 [build-system]
 requires      = ["setuptools>=70.0,<72", "wheel>=0.43"]
@@ -11,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name        = "melodia-py"
-version     = "0.1.8"
+version     = "0.1.9"
 description = "Protein and RNA/DNA/XNA geometry analysis"
 readme      = "README.md"
 license     = { text = "Apache-2.0" }
@@ -61,7 +60,8 @@ dependencies = [
     "dill>=0.4",
     # Imported by the geometry code on every import of melodia_py:
     "numba>=0.61",       # JIT writhing kernel; 0.61 is the first with Python 3.13
-    "joblib>=1.4",       # parallel processing across models (n_jobs)
+    "joblib>=1.6",       # parallel processing across models (n_jobs); older
+                         # versions print ResourceTracker errors on Python 3.13
 ]
 
 # ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ fast = [
 
 parallel = [
     # Now a core dependency; kept for compatibility.
-    "joblib>=1.4",
+    "joblib>=1.6",
 ]
 
 viz = [

@@ -1,4 +1,4 @@
-![Melodia](Melodia_logo.png)
+![Melodia](https://raw.githubusercontent.com/rwmontalvao/Melodia_py/main/Melodia_logo.png)
 
 # Melodia_py
 ## Protein & RNA Structure Analysis
@@ -8,7 +8,7 @@ and Knot Theory descriptors of protein and RNA structures.
 
 ---
 
-## What's new (unreleased)
+## What's new in v0.1.9
 
 > **Results change.** Curvature and torsion change for every residue past the
 > first ~10 of each chain, and values near chain ends and breaks are now NaN.
